@@ -1,0 +1,1 @@
+Write a Kotlin function `parseCapTime(s: String): Instant?` that accepts ISO-8601 timestamps with 'Z' or a UTC offset like +02:00, tries OffsetDateTime first, falls back to Instant.parse, and returns null on failure. Then write three JUnit 4 tests for it. Output only code.

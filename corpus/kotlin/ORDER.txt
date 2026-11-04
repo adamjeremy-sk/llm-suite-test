@@ -1,0 +1,5 @@
+SettingsDialogManager.kt
+WeatherRepository.kt
+LocationPreferences.kt
+AstronomyDisplayManager.kt
+WidgetSyncWorker.kt

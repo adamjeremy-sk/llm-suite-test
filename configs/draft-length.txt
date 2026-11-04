@@ -1,0 +1,12 @@
+# Speculative draft length sweep (for models with MTP heads, or any --spec-type that uses --spec-draft-n-max).
+# n0 removes speculative decoding entirely: the no-drafting baseline.
+# Keeps every other setting from your script (including --spec-draft-sampling if you set one).
+n0 | --spec-type=DEL --spec-draft-n-max=DEL --spec-draft-sampling=DEL --spec-draft-p-min=DEL | no drafting
+n1 | --spec-draft-n-max=1 |
+n2 | --spec-draft-n-max=2 |
+n3 | --spec-draft-n-max=3 |
+n4 | --spec-draft-n-max=4 |
+n5 | --spec-draft-n-max=5 |
+n6 | --spec-draft-n-max=6 |
+n7 | --spec-draft-n-max=7 |
+n8 | --spec-draft-n-max=8 | on RDNA3 + Vulkan this hit a ~2.4x slower verify step (2026-11-04)

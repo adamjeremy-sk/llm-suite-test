@@ -1,0 +1,5 @@
+Below is SettingsDialogManager.kt from an Android app. Find the code that builds the widget opacity card and rewrite that function so its colors come from the theme palette instead of hardcoded hex values. Output only the rewritten function.
+
+```kotlin
+{src}
+```

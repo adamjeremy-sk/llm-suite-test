@@ -1,0 +1,6 @@
+On an island, knights always tell the truth and knaves always lie. You meet four islanders, A, B, C and D.
+A says: "Exactly one of us four is a knight."
+B says: "A is a knave."
+C says: "B and I are different types."
+D says: "C is a knight and A is a knave."
+Determine who is a knight and who is a knave. Reason step by step, check every statement against your answer, then give the final assignment on one line.

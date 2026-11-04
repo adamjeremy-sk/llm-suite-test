@@ -1,0 +1,10 @@
+# MTP drafting options that mattered on Qwen3.8-27B (2026-11-04). Assumes your script already has
+# --spec-type draft-mtp. Reference first and last to catch drift.
+ref                  | --spec-draft-n-max=5 --spec-draft-sampling=greedy                  | greedy drafting, N=5
+n5_prob              | --spec-draft-n-max=5 --spec-draft-sampling=probabilistic           | Qwen3.8 winner: +6.8% short, +5.8% long
+n4_prob              | --spec-draft-n-max=4 --spec-draft-sampling=probabilistic           |
+n6_prob              | --spec-draft-n-max=6 --spec-draft-sampling=probabilistic           |
+n7_pmin0.7           | --spec-draft-n-max=7 --spec-draft-p-min=0.7 --spec-draft-sampling=greedy | early stop; good at long context
+n7_pmin0.7_prob      | --spec-draft-n-max=7 --spec-draft-p-min=0.7 --spec-draft-sampling=probabilistic |
+n5_mtp_ngram         | --spec-draft-n-max=5 --spec-type=draft-mtp,ngram-mod                | MTP + n-gram copying (was -11% long on Qwen3.8)
+ref_end              | --spec-draft-n-max=5 --spec-draft-sampling=greedy                  | reference again

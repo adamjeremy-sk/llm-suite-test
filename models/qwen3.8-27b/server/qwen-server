@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Starts the local Qwen3.8-27B server on the RX 7900 XTX.
+# Reasoning preservation is kept ON (template default) to preserve KV/DeltaNet cache across agent turns.
+#
+# 2026-11-03 changes (loop hardening, matching gemma-server):
+#   - KV cache q4_0 -> q8_0 (4-bit K cache degrades attention and makes repetition loops more likely).
+#     If this OOMs: first drop -c to 98304; if still tight, set --cache-type-v back to q4_0 (keep K at q8_0).
+#   - Added -n 8192 per-response cap so a runaway loop costs one turn, not the whole context.
+#     Reasoning tokens (budget 2048) count toward this cap.
+#   - Added a log file (same as gemma-server) for diagnosing bad turns.
+#   - Sampling unchanged. Check the Qwen3.8 model card: if it lists separate thinking-mode values,
+#     use those here since reasoning is on (earlier Qwen3 releases recommended temp 0.6 / top-p 0.95 / top-k 20).
+#   - Both servers use port 8080: run one at a time.
+#   - Pinned to the RX 7900 XTX with --device Vulkan0 (backend is Vulkan/RADV; the Intel UHD 770 iGPU is
+#     also visible as Vulkan1 and llama.cpp would otherwise be free to split layers onto it).
+#     Suite v1 ran at >70 t/s, so it was already GPU-resident; this is insurance.
+#
+# 2026-11-04 changes (speed benchmarks, see ~/Projects/llm-suite-test/models/qwen3.8-27b/):
+#   - MTP drafting: --spec-draft-n-max 5 kept (best of N=0..8; N=8 hits a ~2.4x slower verify step on Vulkan).
+#   - Added --spec-draft-sampling probabilistic: drafts are sampled like the main model samples (temp 0.7)
+#     instead of argmax, so more of them are accepted. Measured +6.8% short prompts, +5.8% long context
+#     (22k/50k tokens), same cost per verify step, same VRAM. Output distribution is unchanged (the main
+#     model still verifies every token). Previous version: qwen-server.bak-20261104.
+
+MODEL="$HOME/.cache/huggingface/hub/models--Abiray--Qwen3.8-27B-Q4_K_M-GGUF/snapshots/f7a1cda580fe828415151042bf9f3dc5bb8b0d76/Qwen3.8-27B-Q4_K_M.gguf"
+
+exec llama server \
+  -m "$MODEL" \
+  --alias qwen3.8-27b \
+  -ngl 99 \
+  --device Vulkan0 \
+  -c 131072 \
+  -fa on \
+  --cache-type-k q8_0 \
+  --cache-type-v q8_0 \
+  --cache-reuse 256 \
+  --cache-ram 16384 \
+  -n 8192 \
+  -b 2048 \
+  -ub 512 \
+  --parallel 1 \
+  --jinja \
+  --reasoning on \
+  --reasoning-budget 2048 \
+  --chat-template-kwargs '{"reasoning_effort": "medium"}' \
+  --spec-type draft-mtp \
+  --spec-draft-n-max 5 \
+  --spec-draft-sampling probabilistic \
+  --temp 0.7 \
+  --top-k 20 \
+  --top-p 0.80 \
+  --min-p 0.0 \
+  --log-colors off \
+  --log-file "$HOME/llama-server-qwen.log" \
+  --host 127.0.0.1 \
+  --port 8080 \
+  "$@"

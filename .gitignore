@@ -1,0 +1,4 @@
+# raw sweep output (CSVs, responses, server logs, temp scripts) — only reports in models/*/results are tracked
+runs/
+__pycache__/
+*.pyc

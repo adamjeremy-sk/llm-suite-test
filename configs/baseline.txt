@@ -1,0 +1,5 @@
+# Baseline: run your server script exactly as it is. Start here with any new model.
+# Format of every configs file:  name | flags | note
+#   --flag=value replaces that flag's line in your script (or adds it), --flag=DEL removes it.
+#   Empty flags = script unchanged. The first line is the reference others are compared against.
+baseline | | your server script, unchanged

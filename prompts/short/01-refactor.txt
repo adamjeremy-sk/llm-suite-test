@@ -1,0 +1,17 @@
+Rewrite this Kotlin function so it uses a when-expression and returns early. Output only the code.
+
+```kotlin
+fun dayLabel(index: Int, ctx: Context): String {
+    var label = ""
+    if (index == 0) {
+        label = ctx.getString(R.string.today)
+    } else {
+        if (index == 1) {
+            label = ctx.getString(R.string.tomorrow)
+        } else {
+            label = ctx.getString(R.string.day_n, index + 1)
+        }
+    }
+    return label
+}
+```
