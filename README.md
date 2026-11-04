@@ -55,7 +55,8 @@ hardware are printed in every report.
 ## Methodology and handover
 
 [TESTING.md](TESTING.md) explains how the measurements work, how to read a report, the pitfalls we hit,
-and how to continue the work (written so another person or AI agent can pick it up cold).
+and how to run a new model. [HANDOFF.md](HANDOFF.md) is the continuity log: where things stand, the
+test machine, open items. Both are written so another person or AI agent can pick the work up cold.
 
 ## Licence
 
