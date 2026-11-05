@@ -79,6 +79,13 @@ work. It is not needed to run the suite. It shows, per server:
   The window's own Close button still quits. Uses AppIndicator (`gir1.2-ayatanaappindicator3-0.1`, with the
   AppIndicator shell extension on stock Ubuntu GNOME), falls back to the old GTK status icon, and is skipped
   if neither works (`--no-tray` turns it off).
+- **Terminal:** a collapsible section with a fresh shell (your `$SHELL`, started in the directory ctxmon was
+  launched from) so you can run commands without leaving the window. Needs `gir1.2-vte-2.91`. It starts the first
+  time you open it; Ctrl+Shift+C / Ctrl+Shift+V copy and paste. If the shell exits, collapse and re-open to restart.
+- **Show / hide and collapse:** Options has a checkbox for every part of the window (model and port, percentage
+  and bar, details, generation speed, both graphs, recent requests, GPU memory, terminal, status line).
+  Details, both graphs, recent requests, GPU memory and the terminal also have a chevron to collapse or expand
+  them; GPU memory keeps its numbers in the title when collapsed. Both choices are remembered.
 - **No server running:** everything reads zero.
 
 It polls each server's `/slots` and `/props` endpoints and reads its log file for token counts and finished
@@ -100,8 +107,8 @@ python3 ctxmon_gtk.py --warn 70,90 --history 30 --no-tray --minimized   # other 
 ```
 
 Needs `python3-gi` and `gir1.2-gtk-3.0` (already on Ubuntu desktop). Optional: `python3-gi-cairo` (graphs),
-`gir1.2-ayatanaappindicator3-0.1` (tray), `libnotify-bin` (notifications). The **Options** button sets Always on
-top, window opacity (30-100%) and notifications, saved in `~/.config/ctxmon/settings.json`. `ctxmon.svg` is the icon.
+`gir1.2-ayatanaappindicator3-0.1` (tray), `gir1.2-vte-2.91` (terminal), `libnotify-bin` (notifications). The **Options** button sets Always on
+top, window opacity (30-100%), notifications and which sections are shown, saved in `~/.config/ctxmon/settings.json`. `ctxmon.svg` is the icon.
 
 Troubleshooting:
 - *Context stays at 0 / "no request in the log yet":* check the log format with

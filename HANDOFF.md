@@ -8,7 +8,7 @@ Update §1 and add a §6 entry whenever a session ends.
 
 | Field | Value |
 |---|---|
-| Updated | 2026-11-05 ~13:00 |
+| Updated | 2026-11-05 ~13:15 |
 | Repo | github.com/adamjeremy-sk/llm-suite-test (public, GPL-3.0), local `~/Projects/llm-suite-test`, branch `main` |
 | Prompt set | v2 (v1 = refactor, codegen, prose + longctx/xlctx; v2 added math, logic). Core geo-mean = v1 short prompts |
 | Models tested | qwen3.8-27b (complete: see models/qwen3.8-27b/REPORT_2026-11-04.md) |
@@ -79,6 +79,10 @@ Update §1 and add a §6 entry whenever a session ends.
   history, exact-vs-estimate token display, system tray. Request history tracks prompt *sizes*, not text (the
   server log doesn't contain prompts). Tray close behaviour: the Close button quits; "Hide to tray" hides.
 
+- 2026-11-05 — (Adam) ctxmon also gets an embedded terminal (VTE, collapsed by default), Options checkboxes to
+  show/hide each section, and chevrons on more sections. The exact/estimate line has a fixed two-line slot
+  (Adam's screenshot showed it wrapping and pushing the lines below it).
+
 ## 5. Open items / backlog
 
 - **First real run of the rebuilt tools** (see §1 caveat).
@@ -103,6 +107,13 @@ Update §1 and add a §6 entry whenever a session ends.
 - Tooling: VRAM reading is AMD-sysfs or `nvidia-smi` only; add others if contributors need them.
 
 ## 6. Session log  *(newest first)*
+
+### 2026-11-05 — ctxmon terminal, show/hide options, more chevrons, layout fix
+- Added: VTE terminal section, per-section visibility checkboxes (settings.json keys `show`, `expanded`),
+  expanders for details/graphs/requests/GPU memory/terminal. Fixed the layout shift from the wrapping
+  estimate line (fixed 2-line slot, ellipsis) and shortened its text. Logic tests and a stubbed-GTK smoke run
+  pass; the terminal (VTE) path and the show/hide wiring have not run on real GTK here. Adam's screenshot
+  shows the earlier version does run on his machine.
 
 ### 2026-11-05 — ctxmon feature pass (graphs, multi-server, VRAM, warnings, history, tray)
 - Rewrote ctxmon_gtk.py: logic (state/estimates/warnings/graph geometry/VRAM/log parsing) is separate from
