@@ -8,7 +8,7 @@ Update §1 and add a §6 entry whenever a session ends.
 
 | Field | Value |
 |---|---|
-| Updated | 2026-11-05 ~13:40 |
+| Updated | 2026-11-05 ~14:10 |
 | Repo | github.com/adamjeremy-sk/llm-suite-test (public, GPL-3.0), local `~/Projects/llm-suite-test`, branch `main` |
 | Prompt set | v2 (v1 = refactor, codegen, prose + longctx/xlctx; v2 added math, logic). Core geo-mean = v1 short prompts |
 | Models tested | qwen3.8-27b (complete: see models/qwen3.8-27b/REPORT_2026-11-04.md) |
@@ -87,6 +87,9 @@ Update §1 and add a §6 entry whenever a session ends.
   terminal in a draggable pane). GPU memory bar colour = vendor (AMD red, NVIDIA green, Intel blue), not fullness.
   GPU memory stays one shared window-level strip, not per card.
 
+- 2026-11-05 — (Adam) ctxmon: no scroll windows; window opens at natural size and refits when sections are
+  toggled. Request table is a fixed grid of the newest N rows (`--rows`, default 8), not a scrolled list.
+
 ## 5. Open items / backlog
 
 - **First real run of the rebuilt tools** (see §1 caveat).
@@ -111,6 +114,17 @@ Update §1 and add a §6 entry whenever a session ends.
 - Tooling: VRAM reading is AMD-sysfs or `nvidia-smi` only; add others if contributors need them.
 
 ## 6. Session log  *(newest first)*
+
+### 2026-11-05 — ctxmon sizing without scroll bars; tray reopen bug fixed
+- **Tray bug (Adam: "closing to tray works, opening back up does not")**: `MonitorWindow.show` was an attribute
+  (visibility settings dict) that shadowed `Gtk.Window.show()`, so the tray's Show crashed. Renamed to `shown`;
+  also renamed `notify` (it shadowed `GObject.notify`) to `send_notification`. Lesson: never name an attribute
+  on a Gtk subclass after a Gtk method. Tray also now updates only when its text changes (it was sending D-Bus
+  updates twice a second), has separate Show/Hide menu items, and middle-click shows the window.
+- Sizing: removed ScrolledWindows, label min widths reserve room, request table is a Grid, window refits when
+  sections are toggled. Not verified on real GTK (sizes are by character width, so check the screenshot).
+- On opening the repo, `ctxmon_gtk.py` was missing from the working tree (`git status` showed it deleted; not done
+  by the agent, probably moved by Adam). The updated file was written back to the same path.
 
 ### 2026-11-05 — ctxmon compact layout, vendor-coloured GPU bar
 - Rebuilt the ServerPanel/MonitorWindow layout (see decision log). Logic tests + stubbed-GTK smoke pass; the real

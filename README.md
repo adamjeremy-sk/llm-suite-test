@@ -79,9 +79,14 @@ work. It is not needed to run the suite. It shows, per server:
 - **Layout:** each server is a compact card: model and run state on top; context (percentage, bar, details)
   beside generation and prompt speed; the two graphs side by side; then the request table. The exact/estimate
   line is a single line (full text in its tooltip) placed last in its block, so it can never shift anything.
+- **No scroll bars:** the window opens at the size of its content (labels reserve room for their longest normal
+  text) and resizes when you collapse, expand or hide a section. The request table is a fixed grid of the newest
+  8 requests (`--rows N`, up to 50 are kept in memory). With several servers the cards sit side by side, so the
+  window gets about 520 px wider per server.
 - **Several servers:** one card per server, side by side.
 - **System tray:** an icon with a menu (show/hide window, per-server percentages, quit) and the worst context
-  percentage as its label. "Hide to tray" keeps it running without a window; `--minimized` starts hidden.
+  percentage as its label. "Hide to tray" keeps it running without a window; `--minimized` starts hidden. Left-click
+  opens the icon's menu (Show window / Hide window / Quit); middle-click shows the window.
   The window's own Close button still quits. Uses AppIndicator (`gir1.2-ayatanaappindicator3-0.1`, with the
   AppIndicator shell extension on stock Ubuntu GNOME), falls back to the old GTK status icon, and is skipped
   if neither works (`--no-tray` turns it off).
@@ -109,7 +114,7 @@ python3 ctxmon_gtk.py \
   --server name=qwen,url=http://127.0.0.1:8080,log=~/llama-server-qwen.log \
   --server name=other,url=http://127.0.0.1:8081,log=~/llama-server-other.log,ctx=32768
 
-python3 ctxmon_gtk.py --warn 70,90 --history 30 --no-tray --minimized   # other options
+python3 ctxmon_gtk.py --warn 70,90 --history 30 --rows 12 --no-tray --minimized   # other options
 ```
 
 Needs `python3-gi` and `gir1.2-gtk-3.0` (already on Ubuntu desktop). Optional: `python3-gi-cairo` (graphs),
@@ -121,6 +126,8 @@ Troubleshooting:
   `grep -E "n_tokens|n_past" ~/llama-server-qwen.log | tail -3`
 - *Speed never says "(live)":* run `curl -s localhost:8080/slots | python3 -m json.tool` while generating and look for `n_decoded`.
 - *"server busy / not responding":* the server is slow to answer (often a long prompt); the last numbers stay on screen.
+- *Tray icon can't bring the window back:* use the menu's "Show window" (or middle-click the icon); if the menu does
+  nothing, tell us which desktop you use.
 - *No tray icon:* install the AppIndicator extension/library, or run with `--no-tray`; the window works either way.
 - *"GPU memory: not available":* only AMD (sysfs) and `nvidia-smi` are read.
 

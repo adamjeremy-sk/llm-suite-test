@@ -789,10 +789,10 @@ if HAVE_GTK:
             cr.show_text("now")
 
     class ServerPanel(Gtk.Box):
-        def __init__(self, cfg, state, window_seconds, show, expanded, on_expand):
+        def __init__(self, cfg, state, window_seconds, show, expanded, on_expand, rows=8):
             super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
             self.cfg, self.state, self.window_seconds = cfg, state, window_seconds
-            self.on_expand = on_expand
+            self.on_expand, self.rows = on_expand, rows
             self.sections, self.exps, self._syncing = {}, {}, False
             self.set_size_request(480, -1)
 
@@ -818,6 +818,12 @@ if HAVE_GTK:
             self.gen_note = make_label("generation", "dim")
             self.prompt = make_label("", "dim")
             self.prompt.set_ellipsize(Pango.EllipsizeMode.END)
+            # No scroll windows: the window opens at its natural size, so every label reserves room for its
+            # longest normal text up front (otherwise the window would be sized for the short placeholders).
+            for lbl, chars in ((self.model, 24), (self.port, 24), (self.status, 30), (self.pct, 6),
+                               (self.tokens, 28), (self.free, 40), (self.source, 40), (self.gen, 9),
+                               (self.gen_note, 25), (self.prompt, 28)):
+                lbl.set_width_chars(chars)
 
             def vbox(*widgets, spacing=4):
                 box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=spacing)
@@ -874,23 +880,23 @@ if HAVE_GTK:
             graphs.pack_start(expander("speed_graph", "Speed graph", speed_child), True, True, 0)
             self.pack_start(graphs, False, False, 0)
 
-            # Row 4: recent requests, compact columns.
-            self.store = Gtk.ListStore(str, str, str, str, str, str)
-            tree = Gtk.TreeView(model=self.store)
-            for i, title in enumerate(("Time", "Prompt tok", "PP t/s", "Gen tok", "Gen t/s", "Context")):
-                r = Gtk.CellRendererText()
-                r.set_property("xalign", 0.0 if i == 0 else 1.0)
-                col = Gtk.TreeViewColumn(title, r, text=i)
-                col.set_min_width(70)
-                tree.append_column(col)
-            spacer = Gtk.TreeViewColumn("")  # soaks up extra width so the real columns stay narrow
-            spacer.set_expand(True)
-            tree.append_column(spacer)
-            sw = Gtk.ScrolledWindow()
-            sw.set_min_content_height(170)
-            sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-            sw.add(tree)
-            self.expander = expander("requests", "Recent requests (0)", sw)
+            # Row 4: recent requests as a fixed grid (no scrolling, fixed height): the newest `rows` requests.
+            self.req_titles = ("Time", "Prompt tok", "PP t/s", "Gen tok", "Gen t/s", "Context")
+            widths = (8, 10, 7, 8, 7, 8)
+            grid = Gtk.Grid()
+            grid.set_column_spacing(14)
+            grid.set_row_spacing(2)
+            self.req_cells = []
+            for r in range(rows + 1):
+                cells = []
+                for c, title in enumerate(self.req_titles):
+                    lbl = make_label(title if r == 0 else "", "dim" if r == 0 else None)
+                    lbl.set_xalign(0 if c == 0 else 1)
+                    lbl.set_width_chars(widths[c])
+                    grid.attach(lbl, c, r, 1, 1)
+                    cells.append(lbl)
+                self.req_cells.append(cells)
+            self.expander = expander("requests", "Recent requests (0)", grid)
             self.pack_start(self.expander, False, False, 0)
             self.nreq = 0
 
@@ -920,12 +926,20 @@ if HAVE_GTK:
             if len(reqs) == self.nreq and self.nreq < MAX_REQUESTS:
                 return
             self.nreq = len(reqs)
-            self.store.clear()
-            for r in reversed(reqs):  # newest first
-                t = "–" if r["t"] is None else time.strftime("%H:%M:%S", time.localtime(r["t"]))
-                self.store.append([t, self._n(r["prompt_tokens"]), self._n(r["prompt_tps"], ".1f"),
-                                   self._n(r["gen_tokens"]), self._n(r["gen_tps"], ".1f"), self._n(r["ctx"])])
-            self.expander.set_label(f"Recent requests ({len(reqs)})")
+            newest = list(reversed(reqs))[:self.rows]  # newest first
+            for i, cells in enumerate(self.req_cells[1:]):
+                if i < len(newest):
+                    r = newest[i]
+                    t = "–" if r["t"] is None else time.strftime("%H:%M:%S", time.localtime(r["t"]))
+                    vals = (t, self._n(r["prompt_tokens"]), self._n(r["prompt_tps"], ".1f"),
+                            self._n(r["gen_tokens"]), self._n(r["gen_tps"], ".1f"), self._n(r["ctx"]))
+                else:
+                    vals = ("",) * 6
+                for lbl, v in zip(cells, vals):
+                    lbl.set_text(v)
+            shown = min(len(reqs), self.rows)
+            self.expander.set_label(f"Recent requests ({len(reqs)})" if len(reqs) <= shown
+                                    else f"Recent requests (latest {shown} of {len(reqs)})")
 
         def show_view(self, v, now):
             if v["state"] == "slow":
@@ -999,14 +1013,18 @@ if HAVE_GTK:
             self.ok = False
             self.window = window
             self.indicator = self.status_icon = None
+            self._last = None
             try:
                 theme = Gtk.IconTheme.get_default()
                 theme.append_search_path(icon_dir)
                 icon = "ctxmon" if theme.has_icon("ctxmon") else "utilities-system-monitor"
                 self.menu = Gtk.Menu()
-                toggle = Gtk.MenuItem(label="Show / hide window")
-                toggle.connect("activate", lambda _i: self.toggle())
-                self.menu.append(toggle)
+                show_item = Gtk.MenuItem(label="Show window")
+                show_item.connect("activate", lambda _i: self.show_window())
+                self.menu.append(show_item)
+                hide_item = Gtk.MenuItem(label="Hide window")
+                hide_item.connect("activate", lambda _i: self.window.hide())
+                self.menu.append(hide_item)
                 self.info = []
                 for n in names:
                     it = Gtk.MenuItem(label=n)
@@ -1024,6 +1042,10 @@ if HAVE_GTK:
                         "ctxmon", icon, mod.IndicatorCategory.APPLICATION_STATUS, icon_dir)
                     self.indicator.set_status(mod.IndicatorStatus.ACTIVE)
                     self.indicator.set_menu(self.menu)
+                    try:  # middle-click on the icon shows the window (left-click opens the menu)
+                        self.indicator.set_secondary_activate_target(show_item)
+                    except Exception:
+                        pass
                     self.ok = True
                 else:
                     self.status_icon = Gtk.StatusIcon.new_from_icon_name(icon)
@@ -1045,19 +1067,33 @@ if HAVE_GTK:
                     continue
             return None
 
+        def show_window(self):
+            w = self.window
+            w.show()
+            try:
+                w.deiconify()
+                w.present_with_time(Gtk.get_current_event_time())
+            except Exception:
+                w.present()
+
         def toggle(self):
             if self.window.get_visible():
                 self.window.hide()
             else:
-                self.window.show()
-                self.window.present()
+                self.show_window()
 
         def update(self, lines, worst_pct):
+            """Push new text to the tray, but only when it changed: updating a menu item or the label
+            sends a D-Bus change signal, and doing that twice a second makes the shell redraw the menu
+            under the pointer, which can swallow the click on 'Show window'."""
             if not self.ok:
                 return
+            label = f"{worst_pct:.0f}%"
+            if self._last == (tuple(lines), label):
+                return
+            self._last = (tuple(lines), label)
             for it, text in zip(self.info, lines):
                 it.set_label(text)
-            label = f"{worst_pct:.0f}%"
             tip = "ctxmon: " + "; ".join(lines)
             try:
                 if self.indicator:
@@ -1083,7 +1119,7 @@ if HAVE_GTK:
             super().__init__(title="llama-server monitor")
             self.cfgs = cfgs
             self.window_seconds = int(args.history * 60)
-            self.set_default_size(min(520 * len(cfgs) + 40, 1500), 620)
+            self._ready = False  # fit_window() does nothing until the window is built
             self.set_border_width(14)
 
             css = Gtk.CssProvider()
@@ -1095,7 +1131,7 @@ if HAVE_GTK:
             self.add(outer)
 
             saved = load_settings()
-            self.show, self.expanded = saved["show"], saved["expanded"]
+            self.shown, self.expanded = saved["show"], saved["expanded"]
 
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
             self.panels = []
@@ -1103,14 +1139,11 @@ if HAVE_GTK:
                 if i:
                     row.pack_start(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL), False, False, 0)
                 panel = ServerPanel(cfg, ServerState(cfg.ctx, args.warn, self.window_seconds),
-                                    self.window_seconds, self.show, self.expanded, self.on_expand)
+                                    self.window_seconds, self.shown, self.expanded, self.on_expand, args.rows)
                 self.panels.append(panel)
                 row.pack_start(panel, True, True, 0)
-            sw = Gtk.ScrolledWindow()
-            sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-            sw.add(row)
             upper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-            upper.pack_start(sw, True, True, 0)
+            upper.pack_start(row, True, True, 0)
 
             # Window-wide sections: GPU memory (shared by all servers) and a terminal in a pane you can
             # drag to resize.
@@ -1153,7 +1186,7 @@ if HAVE_GTK:
             self.show_checks = {}
             for key, label in SECTIONS:
                 cb = Gtk.CheckButton(label=label)
-                cb.set_active(self.show[key])
+                cb.set_active(self.shown[key])
                 cb.connect("toggled", self.apply_options)
                 self.show_checks[key] = cb
                 pop_box.pack_start(cb, False, False, 0)
@@ -1188,8 +1221,9 @@ if HAVE_GTK:
 
             self.connect("destroy", Gtk.main_quit)
             self.summary = {}
-            if self.expanded["terminal"] and self.show["terminal"]:
+            if self.expanded["terminal"] and self.shown["terminal"]:
                 self.ensure_terminal()
+            self._ready = True
             for i, cfg in enumerate(cfgs):
                 Poller(cfg, lambda snap, i=i: self.on_update(i, snap)).start()
             VramPoller(self.on_vram).start()
@@ -1201,7 +1235,7 @@ if HAVE_GTK:
             exp.connect("notify::expanded", lambda e, _p, n=name: self._shared_toggled(n, e))
             exp.show_all()
             exp.set_no_show_all(True)
-            exp.set_visible(self.show[name])
+            exp.set_visible(self.shown[name])
             self.shared[name] = exp
             return exp
 
@@ -1224,6 +1258,21 @@ if HAVE_GTK:
             if name == "terminal" and value:
                 self.ensure_terminal()
             self.save()
+            self.fit_later()
+
+        def fit_later(self):
+            if self._ready:
+                GLib.idle_add(self.fit_window)
+
+        def fit_window(self):
+            """Resize to the content: grows or shrinks the height, never narrows the window."""
+            try:
+                nat = self.get_preferred_size()[1]
+                width, _h = self.get_size()
+                self.resize(max(width, nat.width), nat.height)
+            except Exception:
+                pass
+            return False
 
         # terminal ------------------------------------------------------------
         def _build_terminal(self):
@@ -1283,7 +1332,7 @@ if HAVE_GTK:
         # options -------------------------------------------------------------
         def save(self):
             save_settings({"always_on_top": self.top.get_active(), "opacity": int(self.opacity.get_value()),
-                           "warnings": self.warn.get_active(), "show": self.show, "expanded": self.expanded})
+                           "warnings": self.warn.get_active(), "show": self.shown, "expanded": self.expanded})
 
         def apply_options(self, *_a):
             on = self.top.get_active()
@@ -1291,14 +1340,15 @@ if HAVE_GTK:
             self.set_keep_above(on)
             self.set_opacity(int(self.opacity.get_value()) / 100 if on else 1.0)  # normal windows stay opaque
             for key, cb in self.show_checks.items():
-                self.show[key] = cb.get_active()
+                self.shown[key] = cb.get_active()
                 for panel in self.panels:
-                    panel.set_section_visible(key, self.show[key])
+                    panel.set_section_visible(key, self.shown[key])
                 if key in self.shared:
-                    self.shared[key].set_visible(self.show[key])
-            if self.show["terminal"] and self.expanded["terminal"]:
+                    self.shared[key].set_visible(self.shown[key])
+            if self.shown["terminal"] and self.expanded["terminal"]:
                 self.ensure_terminal()
             self.save()
+            self.fit_later()
 
         def on_vram(self, info):
             if info is None:
@@ -1317,7 +1367,7 @@ if HAVE_GTK:
             style.add_class(self.vram_class)
             return False
 
-        def notify(self, title, body, urgent):
+        def send_notification(self, title, body, urgent):
             try:
                 subprocess.Popen(["notify-send", "-a", "ctxmon", "-u", "critical" if urgent else "normal",
                                   "-i", "dialog-warning", title, body],
@@ -1334,7 +1384,7 @@ if HAVE_GTK:
                 name = self.cfgs[i].name or v.get("model") or self.cfgs[i].endpoint
                 if self.warn.get_active():
                     for _lv, msg, urgent in v["alerts"]:
-                        self.notify(f"Context warning: {name}", msg, urgent)
+                        self.send_notification(f"Context warning: {name}", msg, urgent)
                 self.summary[i] = (name, v["frac"] * 100, v["estimating"])
                 lines = [f"{n}: {'~' if e else ''}{p:.0f}%" for n, p, e in
                          (self.summary.get(k, (self.cfgs[k].name or self.cfgs[k].endpoint, 0, False))
@@ -1357,9 +1407,11 @@ def main():
                          "(replaces --url/--log)")
     ap.add_argument("--warn", default="80,95", help="context %% levels that raise warnings (default 80,95)")
     ap.add_argument("--history", type=float, default=10, help="minutes of graph history (default 10)")
+    ap.add_argument("--rows", type=int, default=8, help="requests shown in the table (default 8)")
     ap.add_argument("--no-tray", action="store_true", help="do not create a system tray icon")
     ap.add_argument("--minimized", action="store_true", help="start hidden in the tray (needs a working tray)")
     args = ap.parse_args()
+    args.rows = max(1, min(args.rows, MAX_REQUESTS))
     try:
         args.warn = tuple(sorted({float(x) for x in args.warn.split(",") if x.strip()}))
         if not args.warn or any(not 0 < x <= 100 for x in args.warn):
