@@ -74,6 +74,7 @@ SETTINGS_PATH = os.path.join(
     os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "ctxmon", "settings.json"
 )
 MIN_OPACITY = 30  # percent; lower than this and the window is effectively invisible
+TERM_ROWS, TERM_ROWS_MIN, TERM_ROWS_MAX, TERM_COLS = 18, 6, 60, 80  # terminal size in text rows / columns
 
 
 # Parts of the window that can be shown or hidden from Options, in display order.
@@ -96,7 +97,7 @@ EXPANDABLE = {"details": True, "ctx_graph": True, "speed_graph": True, "requests
 
 def load_settings(path=SETTINGS_PATH):
     """Saved window options, with defaults for anything missing or unreadable."""
-    s = {"always_on_top": False, "opacity": 100, "warnings": True,
+    s = {"always_on_top": False, "opacity": 100, "warnings": True, "terminal_rows": TERM_ROWS,
          "show": {k: True for k, _ in SECTIONS}, "expanded": dict(EXPANDABLE)}
     try:
         with open(path) as f:
@@ -104,6 +105,7 @@ def load_settings(path=SETTINGS_PATH):
         s["always_on_top"] = bool(saved.get("always_on_top", False))
         s["opacity"] = max(MIN_OPACITY, min(100, int(saved.get("opacity", 100))))
         s["warnings"] = bool(saved.get("warnings", True))
+        s["terminal_rows"] = max(TERM_ROWS_MIN, min(TERM_ROWS_MAX, int(saved.get("terminal_rows", TERM_ROWS))))
         for key in ("show", "expanded"):
             got = saved.get(key)
             if isinstance(got, dict):
@@ -807,7 +809,7 @@ if HAVE_GTK:
             self.alert = make_label("", "alert", wrap=True)
             self.alert.set_no_show_all(True)
             self.tokens = make_label("0 tokens", "sub")
-            self.free = make_label("", "sub")
+            self.free = make_label("", "dim")
             self.free.set_ellipsize(Pango.EllipsizeMode.END)
             # The source line is the last thing in its block and is one ellipsized line (full text in the
             # tooltip), so a long text can never push the widgets below it around.
@@ -821,7 +823,7 @@ if HAVE_GTK:
             # No scroll windows: the window opens at its natural size, so every label reserves room for its
             # longest normal text up front (otherwise the window would be sized for the short placeholders).
             for lbl, chars in ((self.model, 24), (self.port, 24), (self.status, 30), (self.pct, 6),
-                               (self.tokens, 28), (self.free, 40), (self.source, 40), (self.gen, 9),
+                               (self.tokens, 40), (self.free, 28), (self.source, 40), (self.gen, 9),
                                (self.gen_note, 25), (self.prompt, 28)):
                 lbl.set_width_chars(chars)
 
@@ -868,8 +870,10 @@ if HAVE_GTK:
             stats.attach(section("speed", self.gen), 1, 0, 1, 1)
             stats.attach(section("percent", vbox(self.bar, self.alert)), 0, 1, 1, 1)
             stats.attach(section("speed", self.gen_note), 1, 1, 1, 1)
-            stats.attach(expander("details", "Details", vbox(self.tokens, self.free, self.source)), 0, 2, 1, 1)
-            stats.attach(section("speed", self.prompt), 1, 2, 1, 1)
+            stats.attach(expander("details", "Details", vbox(self.tokens, self.source)), 0, 2, 1, 1)
+            right_bottom = vbox(self.prompt, self.free, spacing=2)  # prompt speed + "full in ..." estimate
+            right_bottom.set_valign(Gtk.Align.START)
+            stats.attach(section("speed", right_bottom), 1, 2, 1, 1)
             self.pack_start(stats, False, False, 0)
 
             # Row 3: the two graphs side by side.
@@ -962,10 +966,10 @@ if HAVE_GTK:
                 self.port.set_text(f"{self.cfg.endpoint}  (not listening)")
                 self.pct.set_text("0.0%")
                 set_bar_level(self.bar, 0.0)
-                self.tokens.set_text(f"0 / {ctx:,} tokens")
+                self.tokens.set_text(f"0 / {ctx:,} tokens · {ctx:,} free")
                 self.source.set_text("")
                 self.source.set_tooltip_text(None)
-                self.free.set_text(f"{ctx:,} free")
+                self.free.set_text("")
                 self.alert.hide()
                 self.gen.set_text("0.0 t/s")
                 self.gen_note.set_text("generation")
@@ -977,12 +981,13 @@ if HAVE_GTK:
                 self.port.set_text(self.cfg.endpoint + (f"   ({self.cfg.name})" if self.cfg.name else ""))
                 self.pct.set_text(f"{'~' if v['estimating'] else ''}{v['frac'] * 100:.1f}%")
                 set_bar_level(self.bar, v["frac"])
-                self.tokens.set_text(f"{'~' if v['estimating'] else ''}{shown:,} / {ctx:,} tokens")
+                est = "~" if v["estimating"] else ""
+                free = max(ctx - shown, 0)
+                self.tokens.set_text(f"{est}{shown:,} / {ctx:,} tokens · {est}{free:,} free")
                 self.source.set_text(v["source"])
                 self.source.set_tooltip_text(v["source"])
-                free = max(ctx - shown, 0)
-                eta = f"   (full in ~{fmt_duration(v['eta'])} at this speed)" if v["eta"] and v["eta"] < 600 else ""
-                self.free.set_text(f"{'~' if v['estimating'] else ''}{free:,} free{eta}")
+                self.free.set_text(f"full in ~{fmt_duration(v['eta'])} at this speed"
+                                   if v["eta"] and v["eta"] < 600 else "")
                 if v["level"]:
                     crit = v["level"] >= self.state.levels[-1]
                     self.alert.set_text(f"{'Context almost full' if crit else 'Context filling up'}: "
@@ -1153,26 +1158,25 @@ if HAVE_GTK:
                                     self.window_seconds, self.shown, self.expanded, self.on_expand, args.rows)
                 self.panels.append(panel)
                 row.pack_start(panel, True, True, 0)
-            upper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-            upper.pack_start(row, True, True, 0)
+            outer.pack_start(row, False, False, 0)
 
-            # Window-wide sections: GPU memory (shared by all servers) and a terminal in a pane you can
-            # drag to resize.
+            # Window-wide sections: GPU memory (shared by all servers) and the terminal. No Paned and no
+            # fixed pixel heights: the terminal is sized in text rows (Options) and, while open, takes any
+            # extra height when you make the window taller.
             self.shared = {}
             self.vram_bar = Gtk.ProgressBar()
             self.vram_bar.get_style_context().add_class("vram")
             self.vram_class = None
             self.vram_exp = self._shared_expander("vram", "GPU memory: n/a", self.vram_bar)
-            upper.pack_start(self.vram_exp, False, False, 0)
+            outer.pack_start(self.vram_exp, False, False, 0)
+            self.outer = outer
+            self.term_rows = saved["terminal_rows"]
             self.term_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-            self.term_box.set_size_request(-1, 160)
             self.notebook, self.tab_labels, self.term_count = None, {}, 0
             self._build_terminal()
             self.term_exp = self._shared_expander("terminal", "Terminal", self.term_box)
-            paned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
-            paned.pack1(upper, True, True)
-            paned.pack2(self.term_exp, False, False)
-            outer.pack_start(paned, True, True, 0)
+            outer.pack_start(self.term_exp, False, True, 0)
+            self._term_packing()
 
             # Options popup
             self.top = Gtk.CheckButton(label="Always on top")
@@ -1191,6 +1195,13 @@ if HAVE_GTK:
             pop_box.pack_start(make_label("Opacity (when on top)"), False, False, 0)
             pop_box.pack_start(self.opacity, False, False, 0)
             pop_box.pack_start(self.warn, False, False, 4)
+            self.rows_spin = Gtk.SpinButton.new_with_range(TERM_ROWS_MIN, TERM_ROWS_MAX, 1)
+            self.rows_spin.set_value(self.term_rows)
+            self.rows_spin.connect("value-changed", self.apply_options)
+            rows_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            rows_box.pack_start(make_label("Terminal height (text rows)"), False, False, 0)
+            rows_box.pack_start(self.rows_spin, False, False, 0)
+            pop_box.pack_start(rows_box, False, False, 2)
             pop_box.pack_start(Gtk.Separator(), False, False, 4)
             pop_box.pack_start(make_label("Show:", "dim"), False, False, 0)
             self.show_checks = {}
@@ -1267,6 +1278,7 @@ if HAVE_GTK:
                 self._syncing = False
             if name == "terminal" and value:
                 self.ensure_terminal()
+            self._term_packing()
             self.save()
             self.fit_later()
 
@@ -1275,6 +1287,7 @@ if HAVE_GTK:
             # drew one frame with the old window size, which looked like a flash.
             if self._ready:
                 self.fit_window()
+                GLib.idle_add(self.fit_window)  # no-op when already right; fixes a stale first measurement
 
         def fit_window(self):
             """Resize to the content: grows or shrinks the height, never narrows the window."""
@@ -1297,6 +1310,8 @@ if HAVE_GTK:
                 return
             self.notebook = Gtk.Notebook()
             self.notebook.set_scrollable(True)
+            self.notebook.set_vexpand(True)
+            self.term_box.set_vexpand(True)
             add = Gtk.Button.new_from_icon_name("list-add-symbolic", Gtk.IconSize.MENU)
             add.set_relief(Gtk.ReliefStyle.NONE)
             add.set_tooltip_text("New terminal tab (Ctrl+Shift+T)")
@@ -1315,6 +1330,9 @@ if HAVE_GTK:
             if self.notebook is None:
                 return None
             term = Vte.Terminal()
+            term.set_size(TERM_COLS, self.term_rows)
+            term.set_vexpand(True)
+            term.set_hexpand(True)
             term.set_scrollback_lines(5000)
             term.connect("child-exited", lambda t, _status: GLib.idle_add(self.close_terminal_tab, t))
             term.connect("key-press-event", self._term_key)
@@ -1393,7 +1411,8 @@ if HAVE_GTK:
         # options -------------------------------------------------------------
         def save(self):
             save_settings({"always_on_top": self.top.get_active(), "opacity": int(self.opacity.get_value()),
-                           "warnings": self.warn.get_active(), "show": self.shown, "expanded": self.expanded})
+                           "warnings": self.warn.get_active(), "terminal_rows": self.term_rows,
+                           "show": self.shown, "expanded": self.expanded})
 
         def apply_options(self, *_a):
             on = self.top.get_active()
@@ -1406,10 +1425,24 @@ if HAVE_GTK:
                     panel.set_section_visible(key, self.shown[key])
                 if key in self.shared:
                     self.shared[key].set_visible(self.shown[key])
+            rows = int(self.rows_spin.get_value())
+            if rows != self.term_rows:
+                self.term_rows = rows
+                for term in self.tab_labels:
+                    term.set_size(TERM_COLS, rows)
+            self._term_packing()
             if self.shown["terminal"] and self.expanded["terminal"]:
                 self.ensure_terminal()
             self.save()
             self.fit_later()
+
+        def _term_packing(self):
+            """While the terminal is open it takes the spare height; closed, it is just a one-line header."""
+            open_ = self.expanded["terminal"] and self.shown["terminal"]
+            try:
+                self.outer.set_child_packing(self.term_exp, open_, True, 0, Gtk.PackType.START)
+            except Exception:
+                pass
 
         def on_vram(self, info):
             if info is None:
