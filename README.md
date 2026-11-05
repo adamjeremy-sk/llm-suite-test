@@ -72,14 +72,20 @@ work. It is not needed to run the suite. It shows, per server:
 - **Warnings:** a banner in the panel and a desktop notification (`notify-send`) when context passes 80% and 95%
   (`--warn 80,95`), and when generating at the current speed would fill the context within a minute.
   Warnings re-arm once usage drops 10 points below a level. Notifications can be switched off in Options.
-- **GPU memory:** used / total VRAM of the largest GPU (AMD via sysfs, or `nvidia-smi`), shared by all panels.
-- **Several servers:** one panel per server, side by side.
+- **GPU memory:** used / total VRAM of the largest GPU (AMD via sysfs, or `nvidia-smi`), shared by all panels. The
+  bar is coloured by vendor, not by how full it is (a full GPU is normal when a model is loaded): red for AMD,
+  green for NVIDIA, blue for Intel. Intel iGPUs share system RAM and expose no VRAM counters, so blue only
+  appears if a driver provides the same sysfs files.
+- **Layout:** each server is a compact card: model and run state on top; context (percentage, bar, details)
+  beside generation and prompt speed; the two graphs side by side; then the request table. The exact/estimate
+  line is a single line (full text in its tooltip) placed last in its block, so it can never shift anything.
+- **Several servers:** one card per server, side by side.
 - **System tray:** an icon with a menu (show/hide window, per-server percentages, quit) and the worst context
   percentage as its label. "Hide to tray" keeps it running without a window; `--minimized` starts hidden.
   The window's own Close button still quits. Uses AppIndicator (`gir1.2-ayatanaappindicator3-0.1`, with the
   AppIndicator shell extension on stock Ubuntu GNOME), falls back to the old GTK status icon, and is skipped
   if neither works (`--no-tray` turns it off).
-- **Terminal:** a collapsible section with a fresh shell (your `$SHELL`, started in the directory ctxmon was
+- **Terminal:** a collapsible section in a pane you can drag to resize, with a fresh shell (your `$SHELL`, started in the directory ctxmon was
   launched from) so you can run commands without leaving the window. Needs `gir1.2-vte-2.91`. It starts the first
   time you open it; Ctrl+Shift+C / Ctrl+Shift+V copy and paste. If the shell exits, collapse and re-open to restart.
 - **Show / hide and collapse:** Options has a checkbox for every part of the window (model and port, percentage

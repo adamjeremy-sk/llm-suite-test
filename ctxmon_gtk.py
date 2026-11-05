@@ -605,10 +605,15 @@ def graph_span(points, now, window, minimum=60):
 
 # --------------------------------------------------------------------------- GPU memory (no GTK)
 
-def read_vram(drm_root="/sys/class/drm"):
-    """(used_bytes, total_bytes, name) of the GPU with the most memory, or None.
+VENDORS = {"0x1002": "amd", "0x10de": "nvidia", "0x8086": "intel"}
 
-    AMD cards are read from sysfs; if there are none, nvidia-smi is tried.
+
+def read_vram(drm_root="/sys/class/drm"):
+    """(used_bytes, total_bytes, name, vendor) of the GPU with the most memory, or None.
+
+    vendor is "amd", "nvidia", "intel" or "other". AMD cards are read from sysfs (the
+    mem_info_vram_* files); if there are none, nvidia-smi is tried. Intel iGPUs share system
+    RAM and expose no such counters, so they only show up if a driver provides the same files.
     """
     best = None
     for dev in glob.glob(os.path.join(drm_root, "card[0-9]*", "device")):
@@ -619,8 +624,14 @@ def read_vram(drm_root="/sys/class/drm"):
                 used = int(f.read())
         except (OSError, ValueError):
             continue
+        vendor = "amd"  # mem_info_vram_* is the amdgpu interface
+        try:
+            with open(os.path.join(dev, "vendor")) as f:
+                vendor = VENDORS.get(f.read().strip().lower(), "other")
+        except OSError:
+            pass
         if best is None or total > best[1]:
-            best = (used, total, os.path.basename(os.path.dirname(dev)))
+            best = (used, total, os.path.basename(os.path.dirname(dev)), vendor)
     if best:
         return best
     try:
@@ -630,10 +641,13 @@ def read_vram(drm_root="/sys/class/drm"):
         rows = []
         for line in out.strip().splitlines():
             name, used, total = [x.strip() for x in line.rsplit(",", 2)]
-            rows.append((int(used) * 1048576, int(total) * 1048576, name))
+            rows.append((int(used) * 1048576, int(total) * 1048576, name, "nvidia"))
         return max(rows, key=lambda r: r[1]) if rows else None
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
+
+
+VENDOR_NAMES = {"amd": "AMD", "nvidia": "NVIDIA", "intel": "Intel", "other": "GPU"}
 
 
 def fmt_gib(n):
@@ -644,7 +658,7 @@ def fmt_gib(n):
 
 CSS = b"""
 .model { font-size: 18px; font-weight: bold; }
-.pct { font-size: 44px; font-weight: bold; }
+.pct { font-size: 40px; font-weight: bold; }
 .sub { font-size: 15px; }
 .speed { font-size: 22px; font-weight: bold; }
 .dim { opacity: 0.65; font-size: 12px; }
@@ -655,6 +669,11 @@ progressbar.ok progress   { background-image: none; background-color: #2e9e5b; }
 progressbar.warn progress { background-image: none; background-color: #e0962b; }
 progressbar.crit progress { background-image: none; background-color: #d64541; }
 progressbar.vram trough, progressbar.vram progress { min-height: 10px; }
+progressbar.vram progress { background-image: none; }
+progressbar.vram-amd progress    { background-color: #d64541; }
+progressbar.vram-nvidia progress { background-color: #76b900; }
+progressbar.vram-intel progress  { background-color: #0071c5; }
+progressbar.vram-other progress  { background-color: #8a8f98; }
 """
 
 HAVE_CAIRO = HAVE_VTE = False
@@ -771,37 +790,37 @@ if HAVE_GTK:
 
     class ServerPanel(Gtk.Box):
         def __init__(self, cfg, state, window_seconds, show, expanded, on_expand):
-            super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
             self.cfg, self.state, self.window_seconds = cfg, state, window_seconds
             self.on_expand = on_expand
             self.sections, self.exps, self._syncing = {}, {}, False
-            self.set_size_request(340, -1)
+            self.set_size_request(480, -1)
 
             self.model = make_label("connecting...", "model")
             self.model.set_ellipsize(Pango.EllipsizeMode.END)
             self.port = make_label(cfg.endpoint + (f"   ({cfg.name})" if cfg.name else ""), "dim")
+            self.status = make_label("", "dim")
+            self.status.set_xalign(1)
+            self.status.set_yalign(0)
             self.pct = make_label("0.0%", "pct")
             self.bar = Gtk.ProgressBar()
-            self.tokens = make_label("0 tokens", "sub")
-            # The source line gets a fixed two-line slot so a long text wrapping (or not) never moves
-            # the widgets below it.
-            self.source = make_label("", "dim", wrap=True)
-            self.source.set_lines(2)
-            self.source.set_ellipsize(Pango.EllipsizeMode.END)
-            self.source.set_yalign(0)
-            self.source.set_width_chars(10)
-            self.source.set_max_width_chars(46)
-            self.source.set_size_request(-1, 34)
-            self.free = make_label("", "sub")
-            self.free.set_ellipsize(Pango.EllipsizeMode.END)
             self.alert = make_label("", "alert", wrap=True)
             self.alert.set_no_show_all(True)
-            self.gen = make_label("Generation: 0.0 t/s", "speed")
+            self.tokens = make_label("0 tokens", "sub")
+            self.free = make_label("", "sub")
+            self.free.set_ellipsize(Pango.EllipsizeMode.END)
+            # The source line is the last thing in its block and is one ellipsized line (full text in the
+            # tooltip), so a long text can never push the widgets below it around.
+            self.source = make_label("", "dim")
+            self.source.set_ellipsize(Pango.EllipsizeMode.END)
+            self.source.set_max_width_chars(40)
+            self.gen = make_label("0.0 t/s", "speed")
+            self.gen_note = make_label("generation", "dim")
             self.prompt = make_label("", "dim")
-            self.status = make_label("", "dim", wrap=True)
+            self.prompt.set_ellipsize(Pango.EllipsizeMode.END)
 
-            def vbox(*widgets):
-                box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            def vbox(*widgets, spacing=4):
+                box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=spacing)
                 for w in widgets:
                     box.pack_start(w, False, False, 0)
                 return box
@@ -819,15 +838,27 @@ if HAVE_GTK:
                 exp.set_expanded(expanded.get(name, True))
                 exp.connect("notify::expanded", lambda e, _p, n=name: self._expander_toggled(n, e))
                 self.exps[name] = exp
-                child.show_all()
                 return section(name, exp)
 
-            self.pack_start(section("header", vbox(self.model, self.port)), False, False, 0)
-            self.pack_start(section("percent", vbox(self.pct, self.bar, self.alert)), False, False, 0)
-            self.pack_start(expander("details", "Details", vbox(self.tokens, self.source, self.free)),
-                            False, False, 0)
-            self.pack_start(section("speed", vbox(self.gen, self.prompt)), False, False, 0)
+            # Row 1: model + endpoint on the left, run state on the right.
+            head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            head.pack_start(section("header", vbox(self.model, self.port, spacing=0)), True, True, 0)
+            head.pack_end(section("status", self.status), False, False, 0)
+            self.pack_start(head, False, False, 0)
 
+            # Row 2: context on the left, speed on the right.
+            cols = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=24)
+            left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            left.pack_start(section("percent", vbox(self.pct, self.bar, self.alert)), False, False, 0)
+            left.pack_start(expander("details", "Details", vbox(self.tokens, self.free, self.source)),
+                            False, False, 0)
+            right = section("speed", vbox(self.gen, self.gen_note, self.prompt, spacing=2))
+            right.set_valign(Gtk.Align.START)
+            cols.pack_start(left, True, True, 0)
+            cols.pack_start(right, False, False, 0)
+            self.pack_start(cols, False, False, 0)
+
+            # Row 3: the two graphs side by side.
             if HAVE_CAIRO:
                 self.ctx_graph = Graph("Context", " tok", step=True,
                                        lines=((0.7, (0.88, 0.59, 0.17)), (0.9, (0.84, 0.27, 0.25))))
@@ -835,24 +866,32 @@ if HAVE_GTK:
                 ctx_child, speed_child = self.ctx_graph, self.speed_graph
             else:
                 self.ctx_graph = self.speed_graph = None
-                ctx_child = make_label("Graphs need the python3-gi-cairo package", "dim")
-                speed_child = make_label("Graphs need the python3-gi-cairo package", "dim")
-            self.pack_start(expander("ctx_graph", "Context graph", ctx_child), False, False, 0)
-            self.pack_start(expander("speed_graph", "Speed graph", speed_child), False, False, 0)
+                ctx_child = make_label("Graphs need python3-gi-cairo", "dim")
+                speed_child = make_label("Graphs need python3-gi-cairo", "dim")
+            graphs = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            graphs.set_homogeneous(True)
+            graphs.pack_start(expander("ctx_graph", "Context graph", ctx_child), True, True, 0)
+            graphs.pack_start(expander("speed_graph", "Speed graph", speed_child), True, True, 0)
+            self.pack_start(graphs, False, False, 0)
 
+            # Row 4: recent requests, compact columns.
             self.store = Gtk.ListStore(str, str, str, str, str, str)
             tree = Gtk.TreeView(model=self.store)
             for i, title in enumerate(("Time", "Prompt tok", "PP t/s", "Gen tok", "Gen t/s", "Context")):
                 r = Gtk.CellRendererText()
                 r.set_property("xalign", 0.0 if i == 0 else 1.0)
-                tree.append_column(Gtk.TreeViewColumn(title, r, text=i))
+                col = Gtk.TreeViewColumn(title, r, text=i)
+                col.set_min_width(70)
+                tree.append_column(col)
+            spacer = Gtk.TreeViewColumn("")  # soaks up extra width so the real columns stay narrow
+            spacer.set_expand(True)
+            tree.append_column(spacer)
             sw = Gtk.ScrolledWindow()
-            sw.set_min_content_height(140)
+            sw.set_min_content_height(170)
             sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
             sw.add(tree)
             self.expander = expander("requests", "Recent requests (0)", sw)
             self.pack_start(self.expander, False, False, 0)
-            self.pack_end(section("status", self.status), False, False, 0)
             self.nreq = 0
 
         def _expander_toggled(self, name, exp):
@@ -874,7 +913,7 @@ if HAVE_GTK:
 
         @staticmethod
         def _n(v, spec=","):
-            return "-" if v is None else format(v, spec)
+            return "–" if v is None else format(v, spec)
 
         def refresh_requests(self):
             reqs = self.state.requests
@@ -883,14 +922,14 @@ if HAVE_GTK:
             self.nreq = len(reqs)
             self.store.clear()
             for r in reversed(reqs):  # newest first
-                t = "earlier" if r["t"] is None else time.strftime("%H:%M:%S", time.localtime(r["t"]))
+                t = "–" if r["t"] is None else time.strftime("%H:%M:%S", time.localtime(r["t"]))
                 self.store.append([t, self._n(r["prompt_tokens"]), self._n(r["prompt_tps"], ".1f"),
                                    self._n(r["gen_tokens"]), self._n(r["gen_tps"], ".1f"), self._n(r["ctx"])])
             self.expander.set_label(f"Recent requests ({len(reqs)})")
 
         def show_view(self, v, now):
             if v["state"] == "slow":
-                self.status.set_text(f"server busy / not responding  |  {time.strftime('%H:%M:%S')}")
+                self.status.set_text(f"busy / not responding · {time.strftime('%H:%M:%S')}")
                 return
             if v["state"] == "down":
                 ctx = v["ctx"]
@@ -900,11 +939,13 @@ if HAVE_GTK:
                 set_bar_level(self.bar, 0.0)
                 self.tokens.set_text(f"0 / {ctx:,} tokens")
                 self.source.set_text("")
+                self.source.set_tooltip_text(None)
                 self.free.set_text(f"{ctx:,} free")
                 self.alert.hide()
-                self.gen.set_text("Generation: 0.0 t/s")
-                self.prompt.set_text("Prompt processing: 0.0 t/s")
-                self.status.set_text(f"server not running  |  checked {time.strftime('%H:%M:%S')}")
+                self.gen.set_text("0.0 t/s")
+                self.gen_note.set_text("generation")
+                self.prompt.set_text("0.0 t/s prompt processing")
+                self.status.set_text(f"not running · checked {time.strftime('%H:%M:%S')}")
             else:
                 ctx, shown = v["ctx"], v["shown"]
                 self.model.set_text(v["model"] or "server running")
@@ -913,6 +954,7 @@ if HAVE_GTK:
                 set_bar_level(self.bar, v["frac"])
                 self.tokens.set_text(f"{'~' if v['estimating'] else ''}{shown:,} / {ctx:,} tokens")
                 self.source.set_text(v["source"])
+                self.source.set_tooltip_text(v["source"])
                 free = max(ctx - shown, 0)
                 eta = f"   (full in ~{fmt_duration(v['eta'])} at this speed)" if v["eta"] and v["eta"] < 600 else ""
                 self.free.set_text(f"{'~' if v['estimating'] else ''}{free:,} free{eta}")
@@ -926,18 +968,19 @@ if HAVE_GTK:
                 else:
                     self.alert.hide()
                 if v["live"] is not None:
-                    self.gen.set_text(f"Generation: {v['live']:.1f} t/s (live)")
+                    self.gen.set_text(f"{v['live']:.1f} t/s")
+                    self.gen_note.set_text("generation · live")
                 elif v["gen"] is not None:
-                    self.gen.set_text(f"Generation: {v['gen']:.1f} t/s")
+                    self.gen.set_text(f"{v['gen']:.1f} t/s")
+                    self.gen_note.set_text("generation · last request")
                 else:
-                    self.gen.set_text("Generation: 0.0 t/s")
-                self.prompt.set_text(f"Prompt processing: {v['prompt']:.1f} t/s (last request)"
-                                     if v["prompt"] is not None else "")
+                    self.gen.set_text("0.0 t/s")
+                    self.gen_note.set_text("generation")
+                self.prompt.set_text(f"{v['prompt']:.1f} t/s prompt processing" if v["prompt"] is not None else "")
                 run = "generating" if v["busy"] else "idle"
-                if not v["log_found"]:
-                    self.status.set_text(f"{run}  |  log not found: {self.cfg.log}")
-                else:
-                    self.status.set_text(f"{run}  |  updated {time.strftime('%H:%M:%S')}")
+                self.status.set_tooltip_text(None if v["log_found"] else f"log not found: {self.cfg.log}")
+                self.status.set_text(f"{run} · {'log not found · ' if not v['log_found'] else ''}"
+                                     f"{time.strftime('%H:%M:%S')}")
 
             if self.ctx_graph:
                 ctx = v.get("ctx") or self.cfg.ctx
@@ -1040,7 +1083,7 @@ if HAVE_GTK:
             super().__init__(title="llama-server monitor")
             self.cfgs = cfgs
             self.window_seconds = int(args.history * 60)
-            self.set_default_size(min(380 * len(cfgs) + 40, 1300), 860)
+            self.set_default_size(min(520 * len(cfgs) + 40, 1500), 620)
             self.set_border_width(14)
 
             css = Gtk.CssProvider()
@@ -1066,19 +1109,27 @@ if HAVE_GTK:
             sw = Gtk.ScrolledWindow()
             sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
             sw.add(row)
-            outer.pack_start(sw, True, True, 0)
+            upper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            upper.pack_start(sw, True, True, 0)
 
-            # Window-wide sections: GPU memory (shared by all servers) and a terminal.
+            # Window-wide sections: GPU memory (shared by all servers) and a terminal in a pane you can
+            # drag to resize.
             self.shared = {}
             self.vram_bar = Gtk.ProgressBar()
             self.vram_bar.get_style_context().add_class("vram")
-            self.vram_exp = self._shared_expander("vram", "GPU memory: n/a", self.vram_bar, outer)
+            self.vram_class = None
+            self.vram_exp = self._shared_expander("vram", "GPU memory: n/a", self.vram_bar)
+            upper.pack_start(self.vram_exp, False, False, 0)
             self.term_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-            self.term_box.set_size_request(-1, 220)
+            self.term_box.set_size_request(-1, 160)
             self.term = None
             self.term_alive = False
             self._build_terminal()
-            self.term_exp = self._shared_expander("terminal", "Terminal", self.term_box, outer)
+            self.term_exp = self._shared_expander("terminal", "Terminal", self.term_box)
+            paned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
+            paned.pack1(upper, True, True)
+            paned.pack2(self.term_exp, False, False)
+            outer.pack_start(paned, True, True, 0)
 
             # Options popup
             self.top = Gtk.CheckButton(label="Always on top")
@@ -1143,7 +1194,7 @@ if HAVE_GTK:
                 Poller(cfg, lambda snap, i=i: self.on_update(i, snap)).start()
             VramPoller(self.on_vram).start()
 
-        def _shared_expander(self, name, label, child, outer):
+        def _shared_expander(self, name, label, child):
             exp = Gtk.Expander(label=label)
             exp.add(child)
             exp.set_expanded(self.expanded[name])
@@ -1152,7 +1203,6 @@ if HAVE_GTK:
             exp.set_no_show_all(True)
             exp.set_visible(self.show[name])
             self.shared[name] = exp
-            outer.pack_start(exp, False, False, 0)
             return exp
 
         def _shared_toggled(self, name, exp):
@@ -1254,12 +1304,17 @@ if HAVE_GTK:
             if info is None:
                 self.vram_exp.set_label("GPU memory: not available (needs AMD sysfs or nvidia-smi)")
                 self.vram_bar.set_fraction(0)
-            else:
-                used, total, name = info
-                frac = used / total if total else 0
-                self.vram_exp.set_label(f"GPU memory ({name}): {fmt_gib(used)} / {fmt_gib(total)} GiB  "
-                                        f"({frac * 100:.0f}%)")
-                set_bar_level(self.vram_bar, frac, warn=0.85, crit=0.95)
+                return False
+            used, total, name, vendor = info
+            frac = used / total if total else 0
+            self.vram_exp.set_label(f"GPU memory ({VENDOR_NAMES.get(vendor, 'GPU')}, {name}): "
+                                    f"{fmt_gib(used)} / {fmt_gib(total)} GiB  ({frac * 100:.0f}%)")
+            self.vram_bar.set_fraction(min(frac, 1.0))
+            style = self.vram_bar.get_style_context()  # colour = vendor, not fullness: a full GPU is normal
+            if self.vram_class:
+                style.remove_class(self.vram_class)
+            self.vram_class = f"vram-{vendor if vendor in VENDOR_NAMES else 'other'}"
+            style.add_class(self.vram_class)
             return False
 
         def notify(self, title, body, urgent):

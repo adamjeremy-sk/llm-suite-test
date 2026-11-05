@@ -8,7 +8,7 @@ Update §1 and add a §6 entry whenever a session ends.
 
 | Field | Value |
 |---|---|
-| Updated | 2026-11-05 ~13:15 |
+| Updated | 2026-11-05 ~13:40 |
 | Repo | github.com/adamjeremy-sk/llm-suite-test (public, GPL-3.0), local `~/Projects/llm-suite-test`, branch `main` |
 | Prompt set | v2 (v1 = refactor, codegen, prose + longctx/xlctx; v2 added math, logic). Core geo-mean = v1 short prompts |
 | Models tested | qwen3.8-27b (complete: see models/qwen3.8-27b/REPORT_2026-11-04.md) |
@@ -83,6 +83,10 @@ Update §1 and add a §6 entry whenever a session ends.
   show/hide each section, and chevrons on more sections. The exact/estimate line has a fixed two-line slot
   (Adam's screenshot showed it wrapping and pushing the lines below it).
 
+- 2026-11-05 — (Adam) ctxmon layout redone as compact two-column cards (context | speed, graphs side by side,
+  terminal in a draggable pane). GPU memory bar colour = vendor (AMD red, NVIDIA green, Intel blue), not fullness.
+  GPU memory stays one shared window-level strip, not per card.
+
 ## 5. Open items / backlog
 
 - **First real run of the rebuilt tools** (see §1 caveat).
@@ -107,6 +111,13 @@ Update §1 and add a §6 entry whenever a session ends.
 - Tooling: VRAM reading is AMD-sysfs or `nvidia-smi` only; add others if contributors need them.
 
 ## 6. Session log  *(newest first)*
+
+### 2026-11-05 — ctxmon compact layout, vendor-coloured GPU bar
+- Rebuilt the ServerPanel/MonitorWindow layout (see decision log). Logic tests + stubbed-GTK smoke pass; the real
+  rendering (sizes, Paned behaviour when the terminal expands, graph heights) is unverified here - Adam's
+  screenshots are the check. `read_vram()` now returns (used, total, name, vendor).
+- File copy to Adam's machine failed silently on the first attempt again (checksum showed the old file); a
+  second device_commit_files fixed it. Always verify the checksum after copying.
 
 ### 2026-11-05 — ctxmon terminal, show/hide options, more chevrons, layout fix
 - Added: VTE terminal section, per-section visibility checkboxes (settings.json keys `show`, `expanded`),
