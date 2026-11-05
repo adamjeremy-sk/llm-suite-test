@@ -6,6 +6,8 @@ setting changed at a time, with the results published per model so others can tu
 It answers questions like: *how many speculative draft tokens should I use, does probabilistic drafting
 help, what does 50k tokens of context cost me, does this flag change anything at all?*
 
+It also ships [ctxmon](#ctxmon-live-server-monitor-optional), a small live monitor for a running `llama-server`.
+
 ## Results so far
 
 | Model | Hardware | Best setting found | Short prompts | 22k ctx | 50k ctx | No-drafting baseline | Write-up |
@@ -44,6 +46,7 @@ corpus/       frozen long-context material (5 Kotlin files, GPL-3.0, see corpus/
 models/<m>/   per model: README, REPORT_*.md write-ups, server/ scripts, results/ (one .md per sweep)
 runs/         raw output: CSVs, model responses, server logs (git-ignored)
 ctxmon_gtk.py, ctxmon.svg   optional live monitor for the running server (see below)
+docs/         images used by this README
 ```
 
 ## Contributing results
@@ -55,58 +58,54 @@ hardware are printed in every report.
 
 ## ctxmon: live server monitor (optional)
 
-`ctxmon_gtk.py` is a GTK window that shows what your local `llama-server` is doing while you benchmark or
-work. It is not needed to run the suite. It shows, per server:
+![ctxmon watching a Qwen3.8-27B server mid-generation: context bar, speed tiles, graphs, recent requests, GPU memory and a terminal tab](docs/ctxmon.png)
 
-- **Context usage:** percent, tokens used / total, tokens free; bar turns orange at 70%, red at 90%.
-- **Exact vs estimate:** a line under the count says where the number comes from. *Exact* means the request
-  finished and the server log gave the context size. *Estimate* (shown with `~`) means a request is running:
-  the log's prompt size plus the tokens `/slots` says were generated so far, or, while a new prompt is still
-  being processed, the previous request's size.
-- **Speed:** live tokens/sec while generating, then the final figure; prompt-processing speed of the last request.
-- **Graphs:** context over time and speed over time (last 10 minutes by default; `--history MIN`).
+`ctxmon_gtk.py` is a GTK window that shows what your local `llama-server` is doing while you benchmark or work.
+It is not needed to run the suite. Start your server with `--log-file`, then run `python3 ctxmon_gtk.py`.
+
+### What it shows (one card per server)
+
+- **Context:** the percentage and a full-width bar (orange from 70%, red from 90%), then a details line with
+  tokens used / total / free. The line under it says whether that number is *exact* (the request finished and
+  the server log gave the context size) or an *estimate*, marked `~` (a request is running: the log's prompt size
+  plus the tokens `/slots` says were generated so far, or, while a new prompt is still loading, the previous
+  request's size).
+- **Speed tiles:** generation speed (live while generating, otherwise the last request), prompt-processing
+  speed (last request) and time until the context is full (only while generating).
+- **Graphs:** context over time and speed over time, last 10 minutes by default (`--history MIN`).
   Needs `python3-gi-cairo`; without it the rest still works.
-- **Recent requests:** a table of the last 50 finished requests (prompt tokens and speed, generated tokens
-  and speed, context size afterwards). Requests already in the log when ctxmon starts show "earlier". The
-  server log has token counts and speeds but not the prompt text, so prompts are tracked by size.
-- **Warnings:** a banner in the panel and a desktop notification (`notify-send`) when context passes 80% and 95%
-  (`--warn 80,95`), and when generating at the current speed would fill the context within a minute.
-  Warnings re-arm once usage drops 10 points below a level. Notifications can be switched off in Options.
-- **GPU memory:** used / total VRAM of the largest GPU (AMD via sysfs, or `nvidia-smi`), shared by all panels. The
-  bar is coloured by vendor, not by how full it is (a full GPU is normal when a model is loaded): red for AMD,
-  green for NVIDIA, blue for Intel. Intel iGPUs share system RAM and expose no VRAM counters, so blue only
-  appears if a driver provides the same sysfs files.
-- **Layout:** each server is a compact card: model and run state on top; the context percentage with a bar across
-  the full width; the details line (tokens used / total and free, and whether it is exact or an estimate); a strip
-  of three tiles (generation speed, prompt-processing speed, time until the context is full); the two graphs side
-  by side; then the request table. The exact/estimate line is a single line (full text in its tooltip), so it can
-  never shift anything, and the request table's six equal columns span the full width like the graphs.
-- **No scroll bars:** the window opens at the size of its content (labels reserve room for their longest normal
-  text) and resizes when you collapse, expand or hide a section. The request table is a fixed grid of the newest
-  8 requests (`--rows N`, up to 50 are kept in memory). With several servers the cards sit side by side, so the
-  window gets about 520 px wider per server.
-- **Several servers:** one card per server, side by side.
-- **System tray:** an icon with a menu (show/hide window, per-server percentages, quit) and the worst context
-  percentage as its label. "Hide to tray" keeps it running without a window; `--minimized` starts hidden. Left-click
-  opens the icon's menu (Show window / Hide window / Quit); middle-click shows the window.
-  The window's own Close button still quits. Uses AppIndicator (`gir1.2-ayatanaappindicator3-0.1`, with the
-  AppIndicator shell extension on stock Ubuntu GNOME), falls back to the old GTK status icon, and is skipped
-  if neither works (`--no-tray` turns it off).
-- **Terminal:** a collapsible section with a fresh shell (your `$SHELL`, started
-  in the directory ctxmon was launched from) so you can run commands without leaving the window. Needs
-  `gir1.2-vte-2.91`. It starts the first time you open it. The **+** button (or Ctrl+Shift+T) adds another tab with
-  its own shell; a tab's x button (or Ctrl+Shift+W) closes it, and a tab closes by itself when its shell exits.
-  Tabs can be dragged to reorder and are named after the shell's title. Ctrl+Shift+C / Ctrl+Shift+V copy and
-  paste. Tabs are not remembered between runs. Its height is set in Options ("Terminal height", in text rows,
-  default 18); while it is open it also takes any extra height when you make the window taller.
-- **Show / hide and collapse:** Options has a checkbox for every part of the window (model and port, percentage
-  and bar, details, generation speed, both graphs, recent requests, GPU memory, terminal, status line).
-  Details, both graphs, recent requests, GPU memory and the terminal also have a chevron to collapse or expand
-  them; GPU memory keeps its numbers in the title when collapsed. Both choices are remembered.
+- **Recent requests:** the newest 8 finished requests (`--rows N`; 50 are kept): prompt tokens and speed,
+  generated tokens and speed, and the context size afterwards. Requests already in the log when ctxmon starts show
+  "–" for the time. The log has token counts and speeds but not the prompt text, so prompts are tracked by size.
+- **Warnings:** a banner in the card and a desktop notification (`notify-send`) when the context passes 80% and
+  95% (`--warn 80,95`), and when generating at the current speed would fill it within a minute. A warning
+  re-arms once usage drops 10 points below its level. Notifications can be switched off in Options.
+- **GPU memory:** used / total VRAM of the largest GPU (AMD via sysfs, or `nvidia-smi`), shared by all cards.
+  The bar is coloured by vendor, not by fullness (a full GPU is normal with a model loaded): red AMD, green
+  NVIDIA, blue Intel. Intel iGPUs share system RAM and expose no VRAM counters, so blue only appears if a driver
+  provides the same sysfs files.
+- **Terminal:** a fresh shell (your `$SHELL`, started in the directory ctxmon was launched from) so you can run
+  commands without leaving the window. Needs `gir1.2-vte-2.91`. The **+** button (or Ctrl+Shift+T) adds a tab with
+  its own shell; a tab's x (or Ctrl+Shift+W) closes it, and a tab closes itself when its shell exits. Tabs can be
+  dragged to reorder and are named after the shell's title. Ctrl+Shift+C / Ctrl+Shift+V copy and paste. Tabs are
+  not remembered between runs. The height is set in Options ("Terminal height", in text rows, default 18).
 - **No server running:** everything reads zero.
 
-It polls each server's `/slots` and `/props` endpoints and reads its log file for token counts and finished
-requests, so every server must be started with `--log-file`. It only talks to your local servers.
+### Window behaviour
+
+- **Sizing:** no scroll bars. The window opens at the size of its content and resizes when you collapse, expand or
+  hide a section. With several servers the cards sit side by side (about 520 px wider per server).
+- **Show / hide and collapse:** Options has a checkbox for every part of the window (model and port, percentage
+  and bar, details, speed tiles, both graphs, recent requests, GPU memory, terminal, status line). Details, both
+  graphs, recent requests, GPU memory and the terminal also have a chevron to collapse or expand them (GPU
+  memory keeps its numbers in the title when collapsed). Both choices are remembered.
+- **System tray:** an icon labelled with the worst context percentage. Left-click opens its menu (Show window /
+  Hide window / per-server percentages / Quit), middle-click shows the window. "Hide to tray" keeps ctxmon running
+  without a window and `--minimized` starts hidden; the window's own Close button quits. It uses AppIndicator
+  (`gir1.2-ayatanaappindicator3-0.1`, plus the AppIndicator shell extension on stock Ubuntu GNOME), falls back
+  to the old GTK status icon, and is skipped if neither works (`--no-tray` turns it off).
+
+### Usage
 
 ```bash
 python3 ctxmon_gtk.py                                  # defaults: http://127.0.0.1:8080, ~/llama-server-qwen.log
@@ -123,18 +122,23 @@ python3 ctxmon_gtk.py \
 python3 ctxmon_gtk.py --warn 70,90 --history 30 --rows 12 --no-tray --minimized   # other options
 ```
 
-Needs `python3-gi` and `gir1.2-gtk-3.0` (already on Ubuntu desktop). Optional: `python3-gi-cairo` (graphs),
-`gir1.2-ayatanaappindicator3-0.1` (tray), `gir1.2-vte-2.91` (terminal), `libnotify-bin` (notifications). The **Options** button sets Always on
-top, window opacity (30-100%), notifications and which sections are shown, saved in `~/.config/ctxmon/settings.json`. `ctxmon.svg` is the icon.
+It polls each server's `/slots` and `/props` endpoints and reads its log file for token counts and finished
+requests, so every server must be started with `--log-file`. It only talks to your local servers.
 
-Troubleshooting:
+Needs `python3-gi` and `gir1.2-gtk-3.0` (already on Ubuntu desktop). Optional: `python3-gi-cairo` (graphs),
+`gir1.2-ayatanaappindicator3-0.1` (tray), `gir1.2-vte-2.91` (terminal), `libnotify-bin` (notifications).
+Options (Always on top, window opacity 30-100%, notifications, terminal height, which sections are shown) are
+saved in `~/.config/ctxmon/settings.json`. `ctxmon.svg` is the icon.
+
+### Troubleshooting
+
 - *Context stays at 0 / "no request in the log yet":* check the log format with
   `grep -E "n_tokens|n_past" ~/llama-server-qwen.log | tail -3`
-- *Speed never says "(live)":* run `curl -s localhost:8080/slots | python3 -m json.tool` while generating and look for `n_decoded`.
-- *"server busy / not responding":* the server is slow to answer (often a long prompt); the last numbers stay on screen.
-- *Tray icon can't bring the window back:* use the menu's "Show window" (or middle-click the icon); if the menu does
-  nothing, tell us which desktop you use.
-- *No tray icon:* install the AppIndicator extension/library, or run with `--no-tray`; the window works either way.
+- *Generation never says "live":* run `curl -s localhost:8080/slots | python3 -m json.tool` while generating and
+  look for `n_decoded`.
+- *"busy / not responding":* the server is slow to answer (often a long prompt); the last numbers stay on screen.
+- *The tray menu does nothing, or there is no tray icon:* install the AppIndicator extension/library, or run
+  with `--no-tray`; the window works either way.
 - *"GPU memory: not available":* only AMD (sysfs) and `nvidia-smi` are read.
 
 ## Methodology and handover

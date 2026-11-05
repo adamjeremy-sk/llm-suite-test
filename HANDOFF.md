@@ -8,7 +8,7 @@ Update §1 and add a §6 entry whenever a session ends.
 
 | Field | Value |
 |---|---|
-| Updated | 2026-11-05 ~15:30 |
+| Updated | 2026-11-05 ~16:00 |
 | Repo | github.com/adamjeremy-sk/llm-suite-test (public, GPL-3.0), local `~/Projects/llm-suite-test`, branch `main` |
 | Prompt set | v2 (v1 = refactor, codegen, prose + longctx/xlctx; v2 added math, logic). Core geo-mean = v1 short prompts |
 | Models tested | qwen3.8-27b (complete: see models/qwen3.8-27b/REPORT_2026-11-04.md) |
@@ -125,6 +125,12 @@ Update §1 and add a §6 entry whenever a session ends.
 - Tooling: VRAM reading is AMD-sysfs or `nvidia-smi` only; add others if contributors need them.
 
 ## 6. Session log  *(newest first)*
+
+### 2026-11-05 — README rewrite + screenshot
+- README's ctxmon section restructured (what it shows / window behaviour / usage / troubleshooting) and now has
+  docs/ctxmon.png (Adam's screenshot, pixel-identical to what he attached; the transfer re-encoded the PNG).
+  The screenshot's terminal tab shows another of Adam's projects (vermilion-editor) and a commit message, so
+  check that is OK before pushing a public repo.
 
 ### 2026-11-05 — ctxmon full-width bar and speed tiles
 - Replaced the stats grid with: pct + full-width bar, Details, then a homogeneous 3-tile strip (title, value, note).
