@@ -8,7 +8,7 @@ Update §1 and add a §6 entry whenever a session ends.
 
 | Field | Value |
 |---|---|
-| Updated | 2026-11-05 ~14:10 |
+| Updated | 2026-11-05 ~14:40 |
 | Repo | github.com/adamjeremy-sk/llm-suite-test (public, GPL-3.0), local `~/Projects/llm-suite-test`, branch `main` |
 | Prompt set | v2 (v1 = refactor, codegen, prose + longctx/xlctx; v2 added math, logic). Core geo-mean = v1 short prompts |
 | Models tested | qwen3.8-27b (complete: see models/qwen3.8-27b/REPORT_2026-11-04.md) |
@@ -90,6 +90,9 @@ Update §1 and add a §6 entry whenever a session ends.
 - 2026-11-05 — (Adam) ctxmon: no scroll windows; window opens at natural size and refits when sections are
   toggled. Request table is a fixed grid of the newest N rows (`--rows`, default 8), not a scrolled list.
 
+- 2026-11-05 — (Adam) ctxmon: terminal gets tabs (+ button, Ctrl+Shift+T/W), not persisted. Context/speed/graphs and the
+  request table share one two-column grid. Section toggles resize the window synchronously (no flash).
+
 ## 5. Open items / backlog
 
 - **First real run of the rebuilt tools** (see §1 caveat).
@@ -114,6 +117,15 @@ Update §1 and add a §6 entry whenever a session ends.
 - Tooling: VRAM reading is AMD-sysfs or `nvidia-smi` only; add others if contributors need them.
 
 ## 6. Session log  *(newest first)*
+
+### 2026-11-05 — ctxmon alignment, flash fix, terminal tabs
+- Alignment (from Adam's screenshot): stats are one homogeneous 2-column Grid (same split as the graph row;
+  percentage and speed baseline-aligned); request grid has 6 equal columns across the full width.
+- Flash on expand/collapse: the window refit ran from an idle callback, so one frame was drawn at the old size;
+  it now runs synchronously inside the toggle handler. Not verified visually (no real GTK here).
+- Terminal: Gtk.Notebook of Vte terminals, "+" action button, closable/reorderable tabs, tab named from the shell
+  title, Ctrl+Shift+T/W. Verified only against stubs (new/close bookkeeping); real VTE untested here.
+- File copy to Adam's machine again needed a second device_commit_files; checksum check caught it.
 
 ### 2026-11-05 — ctxmon sizing without scroll bars; tray reopen bug fixed
 - **Tray bug (Adam: "closing to tray works, opening back up does not")**: `MonitorWindow.show` was an attribute

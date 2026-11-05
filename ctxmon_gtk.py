@@ -835,7 +835,7 @@ if HAVE_GTK:
                 widget.show_all()  # before no_show_all, which stops show_all from reaching the children
                 widget.set_no_show_all(True)
                 widget.set_visible(show.get(name, True))
-                self.sections[name] = widget
+                self.sections.setdefault(name, []).append(widget)
                 return widget
 
             def expander(name, label, child):
@@ -852,17 +852,25 @@ if HAVE_GTK:
             head.pack_end(section("status", self.status), False, False, 0)
             self.pack_start(head, False, False, 0)
 
-            # Row 2: context on the left, speed on the right.
-            cols = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=24)
-            left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-            left.pack_start(section("percent", vbox(self.pct, self.bar, self.alert)), False, False, 0)
-            left.pack_start(expander("details", "Details", vbox(self.tokens, self.free, self.source)),
-                            False, False, 0)
-            right = section("speed", vbox(self.gen, self.gen_note, self.prompt, spacing=2))
-            right.set_valign(Gtk.Align.START)
-            cols.pack_start(left, True, True, 0)
-            cols.pack_start(right, False, False, 0)
-            self.pack_start(cols, False, False, 0)
+            # Row 2: context on the left, speed on the right. One grid with two equal columns, the same
+            # split as the graph row below, so the speed block starts exactly above the speed graph; the
+            # percentage and the speed share a text baseline.
+            stats = Gtk.Grid()
+            stats.set_column_spacing(12)
+            stats.set_row_spacing(4)
+            stats.set_column_homogeneous(True)
+            stats.set_row_baseline_position(0, Gtk.BaselinePosition.CENTER)
+            self.pct.set_valign(Gtk.Align.BASELINE)
+            self.gen.set_valign(Gtk.Align.BASELINE)
+            self.gen_note.set_valign(Gtk.Align.CENTER)
+            self.prompt.set_valign(Gtk.Align.START)
+            stats.attach(section("percent", self.pct), 0, 0, 1, 1)
+            stats.attach(section("speed", self.gen), 1, 0, 1, 1)
+            stats.attach(section("percent", vbox(self.bar, self.alert)), 0, 1, 1, 1)
+            stats.attach(section("speed", self.gen_note), 1, 1, 1, 1)
+            stats.attach(expander("details", "Details", vbox(self.tokens, self.free, self.source)), 0, 2, 1, 1)
+            stats.attach(section("speed", self.prompt), 1, 2, 1, 1)
+            self.pack_start(stats, False, False, 0)
 
             # Row 3: the two graphs side by side.
             if HAVE_CAIRO:
@@ -884,14 +892,17 @@ if HAVE_GTK:
             self.req_titles = ("Time", "Prompt tok", "PP t/s", "Gen tok", "Gen t/s", "Context")
             widths = (8, 10, 7, 8, 7, 8)
             grid = Gtk.Grid()
-            grid.set_column_spacing(14)
+            grid.set_column_spacing(12)
             grid.set_row_spacing(2)
+            grid.set_column_homogeneous(True)  # six equal columns across the full width, like the graphs above
+            grid.set_hexpand(True)
             self.req_cells = []
             for r in range(rows + 1):
                 cells = []
                 for c, title in enumerate(self.req_titles):
                     lbl = make_label(title if r == 0 else "", "dim" if r == 0 else None)
                     lbl.set_xalign(0 if c == 0 else 1)
+                    lbl.set_hexpand(True)
                     lbl.set_width_chars(widths[c])
                     grid.attach(lbl, c, r, 1, 1)
                     cells.append(lbl)
@@ -905,8 +916,8 @@ if HAVE_GTK:
                 self.on_expand(name, exp.get_expanded())
 
         def set_section_visible(self, name, visible):
-            if name in self.sections:
-                self.sections[name].set_visible(visible)
+            for widget in self.sections.get(name, ()):
+                widget.set_visible(visible)
 
         def set_section_expanded(self, name, expanded):
             exp = self.exps.get(name)
@@ -1155,8 +1166,7 @@ if HAVE_GTK:
             upper.pack_start(self.vram_exp, False, False, 0)
             self.term_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
             self.term_box.set_size_request(-1, 160)
-            self.term = None
-            self.term_alive = False
+            self.notebook, self.tab_labels, self.term_count = None, {}, 0
             self._build_terminal()
             self.term_exp = self._shared_expander("terminal", "Terminal", self.term_box)
             paned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
@@ -1261,15 +1271,19 @@ if HAVE_GTK:
             self.fit_later()
 
         def fit_later(self):
+            # Resize right now, in the same frame as the section change. Doing it from an idle callback
+            # drew one frame with the old window size, which looked like a flash.
             if self._ready:
-                GLib.idle_add(self.fit_window)
+                self.fit_window()
 
         def fit_window(self):
             """Resize to the content: grows or shrinks the height, never narrows the window."""
             try:
                 nat = self.get_preferred_size()[1]
-                width, _h = self.get_size()
-                self.resize(max(width, nat.width), nat.height)
+                width, height = self.get_size()
+                new = (max(width, nat.width), nat.height)
+                if new != (width, height):
+                    self.resize(*new)
             except Exception:
                 pass
             return False
@@ -1281,41 +1295,82 @@ if HAVE_GTK:
                     make_label("The terminal needs the VTE library:\nsudo apt install gir1.2-vte-2.91", "dim"),
                     False, False, 8)
                 return
-            self.term = Vte.Terminal()
-            self.term.set_scrollback_lines(5000)
-            self.term.connect("child-exited", self._term_exited)
-            self.term.connect("key-press-event", self._term_key)
-            self.term_box.pack_start(self.term, True, True, 0)
+            self.notebook = Gtk.Notebook()
+            self.notebook.set_scrollable(True)
+            add = Gtk.Button.new_from_icon_name("list-add-symbolic", Gtk.IconSize.MENU)
+            add.set_relief(Gtk.ReliefStyle.NONE)
+            add.set_tooltip_text("New terminal tab (Ctrl+Shift+T)")
+            add.connect("clicked", lambda _b: self.add_terminal_tab())
+            add.show()
+            self.notebook.set_action_widget(add, Gtk.PackType.END)
+            self.term_box.pack_start(self.notebook, True, True, 0)
 
         def ensure_terminal(self):
-            """Start a fresh shell the first time the terminal is opened (and again after it exited)."""
-            if self.term is None or self.term_alive:
-                return
+            """Open the first shell the first time the terminal is shown (and again if every tab was closed)."""
+            if self.notebook is not None and self.notebook.get_n_pages() == 0:
+                self.add_terminal_tab()
+
+        def add_terminal_tab(self):
+            """A new tab with a fresh shell, in the directory ctxmon was started from."""
+            if self.notebook is None:
+                return None
+            term = Vte.Terminal()
+            term.set_scrollback_lines(5000)
+            term.connect("child-exited", lambda t, _status: GLib.idle_add(self.close_terminal_tab, t))
+            term.connect("key-press-event", self._term_key)
+            term.connect("window-title-changed", self._term_title)
+            self.term_count += 1
+            label = Gtk.Label(label=f"Shell {self.term_count}")
+            close = Gtk.Button.new_from_icon_name("window-close-symbolic", Gtk.IconSize.MENU)
+            close.set_relief(Gtk.ReliefStyle.NONE)
+            close.set_tooltip_text("Close this tab (Ctrl+Shift+W)")
+            close.connect("clicked", lambda _b, t=term: self.close_terminal_tab(t))
+            tab = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+            tab.pack_start(label, False, False, 0)
+            tab.pack_start(close, False, False, 0)
+            tab.show_all()
+            term.show()
+            self.tab_labels[term] = (label, label.get_text())
+            page = self.notebook.append_page(term, tab)
+            self.notebook.set_tab_reorderable(term, True)
+            self.notebook.set_current_page(page)
+            self._spawn_shell(term)
+            term.grab_focus()
+            return term
+
+        def _spawn_shell(self, term):
             shell = os.environ.get("SHELL") or "/bin/bash"
             try:
                 try:
-                    self.term.spawn_async(Vte.PtyFlags.DEFAULT, os.getcwd(), [shell], None,
-                                          GLib.SpawnFlags.DEFAULT, None, None, -1, None, None)
+                    term.spawn_async(Vte.PtyFlags.DEFAULT, os.getcwd(), [shell], None,
+                                     GLib.SpawnFlags.DEFAULT, None, None, -1, None, None)
                 except (TypeError, AttributeError):  # older VTE
-                    self.term.spawn_sync(Vte.PtyFlags.DEFAULT, os.getcwd(), [shell], None,
-                                         GLib.SpawnFlags.DEFAULT, None, None)
-                self.term_alive = True
+                    term.spawn_sync(Vte.PtyFlags.DEFAULT, os.getcwd(), [shell], None,
+                                    GLib.SpawnFlags.DEFAULT, None, None)
             except Exception as e:
-                self.term_alive = False
                 try:
-                    self.term.feed(f"Could not start {shell}: {e}\r\n".encode())
+                    term.feed(f"Could not start {shell}: {e}\r\n".encode())
                 except Exception:
                     pass
 
-        def _term_exited(self, _term, _status):
-            self.term_alive = False
-            try:
-                self.term.feed(b"\r\n[shell exited - collapse and re-open this section for a new one]\r\n")
-            except Exception:
-                pass
+        def close_terminal_tab(self, term):
+            """Close a tab (its shell gets SIGHUP). Also used when a shell exits on its own."""
+            if self.notebook is not None:
+                page = self.notebook.page_num(term)
+                if page >= 0:
+                    self.notebook.remove_page(page)
+            self.tab_labels.pop(term, None)
+            return False
+
+        def _term_title(self, term):
+            """Tab text follows the shell's window title (user@host: dir), shortened."""
+            entry = self.tab_labels.get(term)
+            if entry:
+                title = (term.get_window_title() or "").strip()
+                entry[0].set_text(title if 0 < len(title) <= 22 else (title[:21] + "…" if title else entry[1]))
 
         def _term_key(self, term, event):
-            """Ctrl+Shift+C / Ctrl+Shift+V copy and paste, as in other terminals."""
+            """Ctrl+Shift+C/V copy and paste, +T new tab, +W close tab, as in other terminals."""
             both = Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK
             if (event.state & both) == both:
                 if event.keyval in (Gdk.KEY_C, Gdk.KEY_c):
@@ -1326,6 +1381,12 @@ if HAVE_GTK:
                     return True
                 if event.keyval in (Gdk.KEY_V, Gdk.KEY_v):
                     term.paste_clipboard()
+                    return True
+                if event.keyval in (Gdk.KEY_T, Gdk.KEY_t):
+                    self.add_terminal_tab()
+                    return True
+                if event.keyval in (Gdk.KEY_W, Gdk.KEY_w):
+                    self.close_terminal_tab(term)
                     return True
             return False
 

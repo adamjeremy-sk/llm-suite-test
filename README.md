@@ -77,7 +77,9 @@ work. It is not needed to run the suite. It shows, per server:
   green for NVIDIA, blue for Intel. Intel iGPUs share system RAM and expose no VRAM counters, so blue only
   appears if a driver provides the same sysfs files.
 - **Layout:** each server is a compact card: model and run state on top; context (percentage, bar, details)
-  beside generation and prompt speed; the two graphs side by side; then the request table. The exact/estimate
+  beside generation and prompt speed; the two graphs side by side; then the request table. Everything sits on
+  the same two-column split: the speed block starts above the speed graph, its figure shares a baseline with
+  the percentage, and the request table's six equal columns span the full width. The exact/estimate
   line is a single line (full text in its tooltip) placed last in its block, so it can never shift anything.
 - **No scroll bars:** the window opens at the size of its content (labels reserve room for their longest normal
   text) and resizes when you collapse, expand or hide a section. The request table is a fixed grid of the newest
@@ -90,9 +92,12 @@ work. It is not needed to run the suite. It shows, per server:
   The window's own Close button still quits. Uses AppIndicator (`gir1.2-ayatanaappindicator3-0.1`, with the
   AppIndicator shell extension on stock Ubuntu GNOME), falls back to the old GTK status icon, and is skipped
   if neither works (`--no-tray` turns it off).
-- **Terminal:** a collapsible section in a pane you can drag to resize, with a fresh shell (your `$SHELL`, started in the directory ctxmon was
-  launched from) so you can run commands without leaving the window. Needs `gir1.2-vte-2.91`. It starts the first
-  time you open it; Ctrl+Shift+C / Ctrl+Shift+V copy and paste. If the shell exits, collapse and re-open to restart.
+- **Terminal:** a collapsible section in a pane you can drag to resize, with a fresh shell (your `$SHELL`, started
+  in the directory ctxmon was launched from) so you can run commands without leaving the window. Needs
+  `gir1.2-vte-2.91`. It starts the first time you open it. The **+** button (or Ctrl+Shift+T) adds another tab with
+  its own shell; a tab's x button (or Ctrl+Shift+W) closes it, and a tab closes by itself when its shell exits.
+  Tabs can be dragged to reorder and are named after the shell's title. Ctrl+Shift+C / Ctrl+Shift+V copy and
+  paste. Tabs are not remembered between runs.
 - **Show / hide and collapse:** Options has a checkbox for every part of the window (model and port, percentage
   and bar, details, generation speed, both graphs, recent requests, GPU memory, terminal, status line).
   Details, both graphs, recent requests, GPU memory and the terminal also have a chevron to collapse or expand
