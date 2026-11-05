@@ -8,13 +8,13 @@ Update §1 and add a §6 entry whenever a session ends.
 
 | Field | Value |
 |---|---|
-| Updated | 2026-11-05 ~12:15 |
+| Updated | 2026-11-05 ~13:00 |
 | Repo | github.com/adamjeremy-sk/llm-suite-test (public, GPL-3.0), local `~/Projects/llm-suite-test`, branch `main` |
 | Prompt set | v2 (v1 = refactor, codegen, prose + longctx/xlctx; v2 added math, logic). Core geo-mean = v1 short prompts |
 | Models tested | qwen3.8-27b (complete: see models/qwen3.8-27b/REPORT_2026-11-04.md) |
 | Adopted config | Qwen3.8-27B: MTP `--spec-draft-n-max 5 --spec-draft-sampling probabilistic` (~90 t/s short, 87 / 71 t/s at 22k / 50k context; 39 t/s without drafting) |
 | Active task | None |
-| Tools | Also in repo: `ctxmon_gtk.py` + `ctxmon.svg`, an optional GTK live monitor of the running server (documented in README.md; the `.desktop` entry and `ctxmon` launcher are intentionally not in the repo) |
+| Tools | Also in repo: `ctxmon_gtk.py` + `ctxmon.svg`, an optional GTK live monitor (context + speed graphs, request history, multi-server, VRAM, warnings, tray; documented in README.md, **GUI untested on real GTK**, see §6; the `.desktop` entry and `ctxmon` launcher are intentionally not in the repo) |
 | **Caveat** | The current `tools/` (bench.py, sweep.sh, report.py) were rebuilt for this repo on 2026-11-04 and so far tested only against a fake server. All Qwen3.8 results came from their direct predecessors (same prompts, byte-identical, same method). **First real run should be a quick baseline** to confirm: `SERVER_SCRIPT=~/.local/bin/qwen-server NO_LONG=1 RUNS=1 bash tools/sweep.sh configs/baseline.txt` |
 | Next action | Adam's choice. Candidates in §5; the planned one is benchmarking a Qwen 4 27B when released (same llama.cpp build first). |
 
@@ -75,6 +75,10 @@ Update §1 and add a §6 entry whenever a session ends.
 - 2026-11-05 — (Adam) ctxmon (live context/speed monitor) joins the repo as an optional tool; its docs live in
   README.md (no separate README-ctxmon.md). `.desktop` file intentionally left out.
 
+- 2026-11-05 — (Adam) ctxmon gets: context/speed graphs, multi-server, VRAM, context warnings, request
+  history, exact-vs-estimate token display, system tray. Request history tracks prompt *sizes*, not text (the
+  server log doesn't contain prompts). Tray close behaviour: the Close button quits; "Hide to tray" hides.
+
 ## 5. Open items / backlog
 
 - **First real run of the rebuilt tools** (see §1 caveat).
@@ -95,9 +99,18 @@ Update §1 and add a §6 entry whenever a session ends.
   `--spec-draft-p-split`.
 - **Qwen 4 27B** (when released): new `models/<alias>/`, its own server script, baseline → draft-length →
   tuning. Re-run Qwen3.8's baseline on the same build if llama.cpp is updated first.
+- **First real run of the new ctxmon** (see §6 2026-11-05): graphs, tray, notifications and multi-server were never run on real GTK.
 - Tooling: VRAM reading is AMD-sysfs or `nvidia-smi` only; add others if contributors need them.
 
 ## 6. Session log  *(newest first)*
+
+### 2026-11-05 — ctxmon feature pass (graphs, multi-server, VRAM, warnings, history, tray)
+- Rewrote ctxmon_gtk.py: logic (state/estimates/warnings/graph geometry/VRAM/log parsing) is separate from
+  GTK and imports without it. Tested here against a fake HTTP server + growing log and a stubbed-GTK smoke
+  run (catches typos only). **Not tested: real drawing, tray, notifications, layout, multi-panel sizing.**
+- Behaviour change: request ctx size = the `stop processing` line *after* the timing lines (llama.cpp prints
+  timings first). Warn levels 80/95 + an "will fill within 60 s" warning; re-arm 10 points lower.
+- No tests are in the repo (they live in the agent's scratchpad); say if they should be added under tools/.
 
 ### 2026-11-05 — ctxmon added to the repo; docs updated
 - Read HANDOFF.md and the new README-ctxmon.md. Merged the ctxmon docs into README.md (new section, Layout

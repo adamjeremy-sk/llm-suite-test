@@ -55,33 +55,61 @@ hardware are printed in every report.
 
 ## ctxmon: live server monitor (optional)
 
-`ctxmon_gtk.py` is a small GTK window that shows what your local `llama-server` is doing while you
-benchmark or work: model and port, context usage, and generation speed. It is not needed to run the suite.
+`ctxmon_gtk.py` is a GTK window that shows what your local `llama-server` is doing while you benchmark or
+work. It is not needed to run the suite. It shows, per server:
 
-- **Context usage:** percent, tokens used / total, tokens free (bar turns orange at 70%, red at 90%).
-  While a request is generating the count is an estimate, marked with `~`.
-- **Speed:** live tokens/sec while generating, then the final figure; prompt-processing speed from the last finished request.
+- **Context usage:** percent, tokens used / total, tokens free; bar turns orange at 70%, red at 90%.
+- **Exact vs estimate:** a line under the count says where the number comes from. *Exact* means the request
+  finished and the server log gave the context size. *Estimate* (shown with `~`) means a request is running:
+  the log's prompt size plus the tokens `/slots` says were generated so far, or, while a new prompt is still
+  being processed, the previous request's size.
+- **Speed:** live tokens/sec while generating, then the final figure; prompt-processing speed of the last request.
+- **Graphs:** context over time and speed over time (last 10 minutes by default; `--history MIN`).
+  Needs `python3-gi-cairo`; without it the rest still works.
+- **Recent requests:** a table of the last 50 finished requests (prompt tokens and speed, generated tokens
+  and speed, context size afterwards). Requests already in the log when ctxmon starts show "earlier". The
+  server log has token counts and speeds but not the prompt text, so prompts are tracked by size.
+- **Warnings:** a banner in the panel and a desktop notification (`notify-send`) when context passes 80% and 95%
+  (`--warn 80,95`), and when generating at the current speed would fill the context within a minute.
+  Warnings re-arm once usage drops 10 points below a level. Notifications can be switched off in Options.
+- **GPU memory:** used / total VRAM of the largest GPU (AMD via sysfs, or `nvidia-smi`), shared by all panels.
+- **Several servers:** one panel per server, side by side.
+- **System tray:** an icon with a menu (show/hide window, per-server percentages, quit) and the worst context
+  percentage as its label. "Hide to tray" keeps it running without a window; `--minimized` starts hidden.
+  The window's own Close button still quits. Uses AppIndicator (`gir1.2-ayatanaappindicator3-0.1`, with the
+  AppIndicator shell extension on stock Ubuntu GNOME), falls back to the old GTK status icon, and is skipped
+  if neither works (`--no-tray` turns it off).
 - **No server running:** everything reads zero.
 
-It polls the server's `/slots` and `/props` endpoints and reads the server's log file for token counts
-and final speeds, so the server must be started with `--log-file`. It only talks to your local server.
+It polls each server's `/slots` and `/props` endpoints and reads its log file for token counts and finished
+requests, so every server must be started with `--log-file`. It only talks to your local servers.
 
 ```bash
-python3 ctxmon_gtk.py                          # defaults: http://127.0.0.1:8080, ~/llama-server-qwen.log
-python3 ctxmon_gtk.py --log ~/llama-server-qwen.log   # server log file
-python3 ctxmon_gtk.py --url http://127.0.0.1:8080     # server address / port
-python3 ctxmon_gtk.py --ctx 131072                    # fallback context size
-python3 ctxmon_gtk.py --interval 0.5                  # seconds between updates
+python3 ctxmon_gtk.py                                  # defaults: http://127.0.0.1:8080, ~/llama-server-qwen.log
+python3 ctxmon_gtk.py --log ~/llama-server-qwen.log    # server log file
+python3 ctxmon_gtk.py --url http://127.0.0.1:8080      # server address / port
+python3 ctxmon_gtk.py --ctx 131072                     # fallback context size
+python3 ctxmon_gtk.py --interval 0.5                   # seconds between updates
+
+# several servers at once (replaces --url/--log; name and ctx are optional)
+python3 ctxmon_gtk.py \
+  --server name=qwen,url=http://127.0.0.1:8080,log=~/llama-server-qwen.log \
+  --server name=other,url=http://127.0.0.1:8081,log=~/llama-server-other.log,ctx=32768
+
+python3 ctxmon_gtk.py --warn 70,90 --history 30 --no-tray --minimized   # other options
 ```
 
-Needs `python3-gi` and `gir1.2-gtk-3.0` (already on Ubuntu desktop). The **Options** button sets
-Always on top and window opacity (30-100%), saved in `~/.config/ctxmon/settings.json`. `ctxmon.svg` is the icon.
+Needs `python3-gi` and `gir1.2-gtk-3.0` (already on Ubuntu desktop). Optional: `python3-gi-cairo` (graphs),
+`gir1.2-ayatanaappindicator3-0.1` (tray), `libnotify-bin` (notifications). The **Options** button sets Always on
+top, window opacity (30-100%) and notifications, saved in `~/.config/ctxmon/settings.json`. `ctxmon.svg` is the icon.
 
 Troubleshooting:
-- *Context stays at 0 / "no request in log yet":* check the log format with
+- *Context stays at 0 / "no request in the log yet":* check the log format with
   `grep -E "n_tokens|n_past" ~/llama-server-qwen.log | tail -3`
 - *Speed never says "(live)":* run `curl -s localhost:8080/slots | python3 -m json.tool` while generating and look for `n_decoded`.
 - *"server busy / not responding":* the server is slow to answer (often a long prompt); the last numbers stay on screen.
+- *No tray icon:* install the AppIndicator extension/library, or run with `--no-tray`; the window works either way.
+- *"GPU memory: not available":* only AMD (sysfs) and `nvidia-smi` are read.
 
 ## Methodology and handover
 
