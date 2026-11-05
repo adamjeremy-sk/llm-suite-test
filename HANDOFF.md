@@ -8,12 +8,13 @@ Update §1 and add a §6 entry whenever a session ends.
 
 | Field | Value |
 |---|---|
-| Updated | 2026-11-04 ~15:30 |
+| Updated | 2026-11-05 ~12:15 |
 | Repo | github.com/adamjeremy-sk/llm-suite-test (public, GPL-3.0), local `~/Projects/llm-suite-test`, branch `main` |
 | Prompt set | v2 (v1 = refactor, codegen, prose + longctx/xlctx; v2 added math, logic). Core geo-mean = v1 short prompts |
 | Models tested | qwen3.8-27b (complete: see models/qwen3.8-27b/REPORT_2026-11-04.md) |
 | Adopted config | Qwen3.8-27B: MTP `--spec-draft-n-max 5 --spec-draft-sampling probabilistic` (~90 t/s short, 87 / 71 t/s at 22k / 50k context; 39 t/s without drafting) |
 | Active task | None |
+| Tools | Also in repo: `ctxmon_gtk.py` + `ctxmon.svg`, an optional GTK live monitor of the running server (documented in README.md; the `.desktop` entry and `ctxmon` launcher are intentionally not in the repo) |
 | **Caveat** | The current `tools/` (bench.py, sweep.sh, report.py) were rebuilt for this repo on 2026-11-04 and so far tested only against a fake server. All Qwen3.8 results came from their direct predecessors (same prompts, byte-identical, same method). **First real run should be a quick baseline** to confirm: `SERVER_SCRIPT=~/.local/bin/qwen-server NO_LONG=1 RUNS=1 bash tools/sweep.sh configs/baseline.txt` |
 | Next action | Adam's choice. Candidates in §5; the planned one is benchmarking a Qwen 4 27B when released (same llama.cpp build first). |
 
@@ -71,6 +72,9 @@ Update §1 and add a §6 entry whenever a session ends.
 - 2026-11-04 — Published reports are immutable; corrections go in a note at the top or in the REPORT file.
 - 2026-11-04 — Each sweep repeats its reference config first and last (drift check).
 
+- 2026-11-05 — (Adam) ctxmon (live context/speed monitor) joins the repo as an optional tool; its docs live in
+  README.md (no separate README-ctxmon.md). `.desktop` file intentionally left out.
+
 ## 5. Open items / backlog
 
 - **First real run of the rebuilt tools** (see §1 caveat).
@@ -94,6 +98,13 @@ Update §1 and add a §6 entry whenever a session ends.
 - Tooling: VRAM reading is AMD-sysfs or `nvidia-smi` only; add others if contributors need them.
 
 ## 6. Session log  *(newest first)*
+
+### 2026-11-05 — ctxmon added to the repo; docs updated
+- Read HANDOFF.md and the new README-ctxmon.md. Merged the ctxmon docs into README.md (new section, Layout
+  entry; run via `python3 ctxmon_gtk.py`), deleted README-ctxmon.md, Adam added ctxmon.svg.
+- Not run: no real benchmark this session. The §1 caveat (rebuilt tools tested only against a fake server)
+  and all §5 items still stand. ctxmon was not run either (no GTK in the agent's VM); docs were checked
+  against the script's argparse defaults and `qwen-server`'s `--log-file` path only.
 
 ### 2026-11-04 — Qwen3.8-27B speed tuning; suite created
 - Started inside WeatherAPP: Adam changed MTP draft length to 5 and asked for a benchmark. Six "different"

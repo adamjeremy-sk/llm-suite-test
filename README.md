@@ -43,6 +43,7 @@ prompts/      frozen prompt set (VERSION, short/*.txt, long-context task templat
 corpus/       frozen long-context material (5 Kotlin files, GPL-3.0, see corpus/kotlin/SOURCE.md)
 models/<m>/   per model: README, REPORT_*.md write-ups, server/ scripts, results/ (one .md per sweep)
 runs/         raw output: CSVs, model responses, server logs (git-ignored)
+ctxmon_gtk.py, ctxmon.svg   optional live monitor for the running server (see below)
 ```
 
 ## Contributing results
@@ -51,6 +52,36 @@ Run the plans on your hardware and add `models/<your-model-alias>/` with your se
 results. Put your GPU/driver tuning in `HW_NOTES` so it lands in the report header. Results are only
 comparable when the prompt set version (`prompts/VERSION`) and the plan match; llama.cpp version and
 hardware are printed in every report.
+
+## ctxmon: live server monitor (optional)
+
+`ctxmon_gtk.py` is a small GTK window that shows what your local `llama-server` is doing while you
+benchmark or work: model and port, context usage, and generation speed. It is not needed to run the suite.
+
+- **Context usage:** percent, tokens used / total, tokens free (bar turns orange at 70%, red at 90%).
+  While a request is generating the count is an estimate, marked with `~`.
+- **Speed:** live tokens/sec while generating, then the final figure; prompt-processing speed from the last finished request.
+- **No server running:** everything reads zero.
+
+It polls the server's `/slots` and `/props` endpoints and reads the server's log file for token counts
+and final speeds, so the server must be started with `--log-file`. It only talks to your local server.
+
+```bash
+python3 ctxmon_gtk.py                          # defaults: http://127.0.0.1:8080, ~/llama-server-qwen.log
+python3 ctxmon_gtk.py --log ~/llama-server-qwen.log   # server log file
+python3 ctxmon_gtk.py --url http://127.0.0.1:8080     # server address / port
+python3 ctxmon_gtk.py --ctx 131072                    # fallback context size
+python3 ctxmon_gtk.py --interval 0.5                  # seconds between updates
+```
+
+Needs `python3-gi` and `gir1.2-gtk-3.0` (already on Ubuntu desktop). The **Options** button sets
+Always on top and window opacity (30-100%), saved in `~/.config/ctxmon/settings.json`. `ctxmon.svg` is the icon.
+
+Troubleshooting:
+- *Context stays at 0 / "no request in log yet":* check the log format with
+  `grep -E "n_tokens|n_past" ~/llama-server-qwen.log | tail -3`
+- *Speed never says "(live)":* run `curl -s localhost:8080/slots | python3 -m json.tool` while generating and look for `n_decoded`.
+- *"server busy / not responding":* the server is slow to answer (often a long prompt); the last numbers stay on screen.
 
 ## Methodology and handover
 
