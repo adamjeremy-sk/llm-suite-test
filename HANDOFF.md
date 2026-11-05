@@ -8,7 +8,7 @@ Update §1 and add a §6 entry whenever a session ends.
 
 | Field | Value |
 |---|---|
-| Updated | 2026-11-05 ~14:40 |
+| Updated | 2026-11-05 ~15:10 |
 | Repo | github.com/adamjeremy-sk/llm-suite-test (public, GPL-3.0), local `~/Projects/llm-suite-test`, branch `main` |
 | Prompt set | v2 (v1 = refactor, codegen, prose + longctx/xlctx; v2 added math, logic). Core geo-mean = v1 short prompts |
 | Models tested | qwen3.8-27b (complete: see models/qwen3.8-27b/REPORT_2026-11-04.md) |
@@ -93,6 +93,11 @@ Update §1 and add a §6 entry whenever a session ends.
 - 2026-11-05 — (Adam) ctxmon: terminal gets tabs (+ button, Ctrl+Shift+T/W), not persisted. Context/speed/graphs and the
   request table share one two-column grid. Section toggles resize the window synchronously (no flash).
 
+- 2026-11-05 — (Adam) ctxmon: dropped the Gtk.Paned (it left dead space and, after collapse/expand cycles, a clipped
+  layout). Terminal is sized in text rows (setting `terminal_rows`, Options spinner, default 18) and takes spare
+  height only while open. Window refit runs immediately and once more from idle (no-op if already right).
+  Tokens and free are one line; the "full in ..." estimate moved under the prompt speed.
+
 ## 5. Open items / backlog
 
 - **First real run of the rebuilt tools** (see §1 caveat).
@@ -117,6 +122,12 @@ Update §1 and add a §6 entry whenever a session ends.
 - Tooling: VRAM reading is AMD-sysfs or `nvidia-smi` only; add others if contributors need them.
 
 ## 6. Session log  *(newest first)*
+
+### 2026-11-05 — ctxmon dead space / collapse-expand layout bug / taller terminal
+- From Adam's screenshots: big empty area under a short terminal, and after collapsing and re-opening sections the
+  top of the window was clipped. Both came from the Paned (GTK gives the whole leftover height to pane 2 until the
+  position is set, and pane 1 may shrink below its content). Removed it. Unverified on real GTK: check collapse /
+  re-open cycles of every section, the terminal rows spinner, and dragging the window taller.
 
 ### 2026-11-05 — ctxmon alignment, flash fix, terminal tabs
 - Alignment (from Adam's screenshot): stats are one homogeneous 2-column Grid (same split as the graph row;
