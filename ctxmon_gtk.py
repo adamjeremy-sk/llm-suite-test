@@ -39,7 +39,7 @@ try:
 
     gi.require_version("Gtk", "3.0")
     gi.require_version("Gdk", "3.0")
-    from gi.repository import Gdk, GLib, Gtk  # noqa: E402
+    from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
 
     HAVE_GTK = True
 except (ImportError, ValueError):  # the logic below stays importable (and testable) without GTK
@@ -76,15 +76,40 @@ SETTINGS_PATH = os.path.join(
 MIN_OPACITY = 30  # percent; lower than this and the window is effectively invisible
 
 
+# Parts of the window that can be shown or hidden from Options, in display order.
+SECTIONS = (
+    ("header", "Model and port"),
+    ("percent", "Context percentage and bar"),
+    ("details", "Context details (tokens, source, free)"),
+    ("speed", "Generation speed"),
+    ("ctx_graph", "Context graph"),
+    ("speed_graph", "Speed graph"),
+    ("requests", "Recent requests"),
+    ("vram", "GPU memory"),
+    ("terminal", "Terminal"),
+    ("status", "Status line"),
+)
+# Sections with a collapse/expand chevron, and whether they start expanded.
+EXPANDABLE = {"details": True, "ctx_graph": True, "speed_graph": True, "requests": False,
+              "vram": True, "terminal": False}
+
+
 def load_settings(path=SETTINGS_PATH):
     """Saved window options, with defaults for anything missing or unreadable."""
-    s = {"always_on_top": False, "opacity": 100, "warnings": True}
+    s = {"always_on_top": False, "opacity": 100, "warnings": True,
+         "show": {k: True for k, _ in SECTIONS}, "expanded": dict(EXPANDABLE)}
     try:
         with open(path) as f:
             saved = json.load(f)
         s["always_on_top"] = bool(saved.get("always_on_top", False))
         s["opacity"] = max(MIN_OPACITY, min(100, int(saved.get("opacity", 100))))
         s["warnings"] = bool(saved.get("warnings", True))
+        for key in ("show", "expanded"):
+            got = saved.get(key)
+            if isinstance(got, dict):
+                for k in s[key]:
+                    if k in got:
+                        s[key][k] = bool(got[k])
     except (OSError, ValueError, TypeError, AttributeError):
         pass
     return s
@@ -475,10 +500,10 @@ class ServerState:
         elif ukind == "final" and not gen_now:
             # busy, but the newest log line is the previous request's end: its prompt is not known yet
             kind, shown, estimating = "processing", used, True
-            source = f"estimate: processing a new prompt; showing the previous request's {used:,}"
+            source = f"estimate: new prompt loading (last known {used:,})"
         elif not gen_now:
             kind, shown, estimating = "processing", used, True
-            source = f"estimate: processing prompt, {used:,} tokens so far"
+            source = f"estimate: prompt loading, {used:,} so far"
         else:
             kind, shown, estimating = "estimate", used + gen_now, True
             source = f"estimate: prompt {used:,} + {gen_now:,} generated"
@@ -632,12 +657,19 @@ progressbar.crit progress { background-image: none; background-color: #d64541; }
 progressbar.vram trough, progressbar.vram progress { min-height: 10px; }
 """
 
+HAVE_CAIRO = HAVE_VTE = False
 if HAVE_GTK:
     try:
         gi.require_foreign("cairo")
         HAVE_CAIRO = True
     except Exception:
-        HAVE_CAIRO = False
+        pass
+    try:
+        gi.require_version("Vte", "2.91")
+        from gi.repository import Vte  # noqa: E402
+        HAVE_VTE = True
+    except (ImportError, ValueError):
+        pass
 
 
 def make_label(text="", css=None, wrap=False):
@@ -738,57 +770,107 @@ if HAVE_GTK:
             cr.show_text("now")
 
     class ServerPanel(Gtk.Box):
-        def __init__(self, cfg, state, window_seconds):
+        def __init__(self, cfg, state, window_seconds, show, expanded, on_expand):
             super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
             self.cfg, self.state, self.window_seconds = cfg, state, window_seconds
+            self.on_expand = on_expand
+            self.sections, self.exps, self._syncing = {}, {}, False
             self.set_size_request(340, -1)
 
             self.model = make_label("connecting...", "model")
+            self.model.set_ellipsize(Pango.EllipsizeMode.END)
             self.port = make_label(cfg.endpoint + (f"   ({cfg.name})" if cfg.name else ""), "dim")
             self.pct = make_label("0.0%", "pct")
             self.bar = Gtk.ProgressBar()
             self.tokens = make_label("0 tokens", "sub")
+            # The source line gets a fixed two-line slot so a long text wrapping (or not) never moves
+            # the widgets below it.
             self.source = make_label("", "dim", wrap=True)
+            self.source.set_lines(2)
+            self.source.set_ellipsize(Pango.EllipsizeMode.END)
+            self.source.set_yalign(0)
+            self.source.set_width_chars(10)
+            self.source.set_max_width_chars(46)
+            self.source.set_size_request(-1, 34)
             self.free = make_label("", "sub")
+            self.free.set_ellipsize(Pango.EllipsizeMode.END)
             self.alert = make_label("", "alert", wrap=True)
             self.alert.set_no_show_all(True)
             self.gen = make_label("Generation: 0.0 t/s", "speed")
             self.prompt = make_label("", "dim")
             self.status = make_label("", "dim", wrap=True)
 
-            for w in (self.model, self.port, Gtk.Separator(), self.pct, self.bar, self.tokens, self.source,
-                      self.free, self.alert):
-                self.pack_start(w, False, False, 4 if isinstance(w, Gtk.Separator) else 0)
-            self.pack_start(Gtk.Separator(), False, False, 4)
-            self.pack_start(self.gen, False, False, 0)
-            self.pack_start(self.prompt, False, False, 0)
+            def vbox(*widgets):
+                box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+                for w in widgets:
+                    box.pack_start(w, False, False, 0)
+                return box
+
+            def section(name, widget):
+                widget.show_all()  # before no_show_all, which stops show_all from reaching the children
+                widget.set_no_show_all(True)
+                widget.set_visible(show.get(name, True))
+                self.sections[name] = widget
+                return widget
+
+            def expander(name, label, child):
+                exp = Gtk.Expander(label=label)
+                exp.add(child)
+                exp.set_expanded(expanded.get(name, True))
+                exp.connect("notify::expanded", lambda e, _p, n=name: self._expander_toggled(n, e))
+                self.exps[name] = exp
+                child.show_all()
+                return section(name, exp)
+
+            self.pack_start(section("header", vbox(self.model, self.port)), False, False, 0)
+            self.pack_start(section("percent", vbox(self.pct, self.bar, self.alert)), False, False, 0)
+            self.pack_start(expander("details", "Details", vbox(self.tokens, self.source, self.free)),
+                            False, False, 0)
+            self.pack_start(section("speed", vbox(self.gen, self.prompt)), False, False, 0)
 
             if HAVE_CAIRO:
                 self.ctx_graph = Graph("Context", " tok", step=True,
                                        lines=((0.7, (0.88, 0.59, 0.17)), (0.9, (0.84, 0.27, 0.25))))
                 self.speed_graph = Graph("Speed", " t/s")
-                self.pack_start(self.ctx_graph, False, False, 2)
-                self.pack_start(self.speed_graph, False, False, 2)
+                ctx_child, speed_child = self.ctx_graph, self.speed_graph
             else:
                 self.ctx_graph = self.speed_graph = None
-                self.pack_start(make_label("Graphs need the python3-gi-cairo package", "dim"), False, False, 0)
+                ctx_child = make_label("Graphs need the python3-gi-cairo package", "dim")
+                speed_child = make_label("Graphs need the python3-gi-cairo package", "dim")
+            self.pack_start(expander("ctx_graph", "Context graph", ctx_child), False, False, 0)
+            self.pack_start(expander("speed_graph", "Speed graph", speed_child), False, False, 0)
 
             self.store = Gtk.ListStore(str, str, str, str, str, str)
             tree = Gtk.TreeView(model=self.store)
             for i, title in enumerate(("Time", "Prompt tok", "PP t/s", "Gen tok", "Gen t/s", "Context")):
                 r = Gtk.CellRendererText()
                 r.set_property("xalign", 0.0 if i == 0 else 1.0)
-                col = Gtk.TreeViewColumn(title, r, text=i)
-                tree.append_column(col)
+                tree.append_column(Gtk.TreeViewColumn(title, r, text=i))
             sw = Gtk.ScrolledWindow()
             sw.set_min_content_height(140)
             sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
             sw.add(tree)
-            self.expander = Gtk.Expander(label="Recent requests (0)")
-            self.expander.add(sw)
+            self.expander = expander("requests", "Recent requests (0)", sw)
             self.pack_start(self.expander, False, False, 0)
-            self.pack_end(self.status, False, False, 0)
+            self.pack_end(section("status", self.status), False, False, 0)
             self.nreq = 0
+
+        def _expander_toggled(self, name, exp):
+            if not self._syncing:
+                self.on_expand(name, exp.get_expanded())
+
+        def set_section_visible(self, name, visible):
+            if name in self.sections:
+                self.sections[name].set_visible(visible)
+
+        def set_section_expanded(self, name, expanded):
+            exp = self.exps.get(name)
+            if exp is not None and exp.get_expanded() != expanded:
+                self._syncing = True
+                try:
+                    exp.set_expanded(expanded)
+                finally:
+                    self._syncing = False
 
         @staticmethod
         def _n(v, spec=","):
@@ -969,12 +1051,16 @@ if HAVE_GTK:
             outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
             self.add(outer)
 
+            saved = load_settings()
+            self.show, self.expanded = saved["show"], saved["expanded"]
+
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
             self.panels = []
             for i, cfg in enumerate(cfgs):
                 if i:
                     row.pack_start(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL), False, False, 0)
-                panel = ServerPanel(cfg, ServerState(cfg.ctx, args.warn, self.window_seconds), self.window_seconds)
+                panel = ServerPanel(cfg, ServerState(cfg.ctx, args.warn, self.window_seconds),
+                                    self.window_seconds, self.show, self.expanded, self.on_expand)
                 self.panels.append(panel)
                 row.pack_start(panel, True, True, 0)
             sw = Gtk.ScrolledWindow()
@@ -982,16 +1068,19 @@ if HAVE_GTK:
             sw.add(row)
             outer.pack_start(sw, True, True, 0)
 
-            # GPU memory (shared by all servers)
-            self.vram_label = make_label("GPU memory: n/a", "sub")
+            # Window-wide sections: GPU memory (shared by all servers) and a terminal.
+            self.shared = {}
             self.vram_bar = Gtk.ProgressBar()
             self.vram_bar.get_style_context().add_class("vram")
-            outer.pack_start(Gtk.Separator(), False, False, 2)
-            outer.pack_start(self.vram_label, False, False, 0)
-            outer.pack_start(self.vram_bar, False, False, 0)
+            self.vram_exp = self._shared_expander("vram", "GPU memory: n/a", self.vram_bar, outer)
+            self.term_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            self.term_box.set_size_request(-1, 220)
+            self.term = None
+            self.term_alive = False
+            self._build_terminal()
+            self.term_exp = self._shared_expander("terminal", "Terminal", self.term_box, outer)
 
             # Options popup
-            saved = load_settings()
             self.top = Gtk.CheckButton(label="Always on top")
             self.top.set_active(saved["always_on_top"])
             self.warn = Gtk.CheckButton(label="Desktop notifications for context warnings")
@@ -1008,6 +1097,15 @@ if HAVE_GTK:
             pop_box.pack_start(make_label("Opacity (when on top)"), False, False, 0)
             pop_box.pack_start(self.opacity, False, False, 0)
             pop_box.pack_start(self.warn, False, False, 4)
+            pop_box.pack_start(Gtk.Separator(), False, False, 4)
+            pop_box.pack_start(make_label("Show:", "dim"), False, False, 0)
+            self.show_checks = {}
+            for key, label in SECTIONS:
+                cb = Gtk.CheckButton(label=label)
+                cb.set_active(self.show[key])
+                cb.connect("toggled", self.apply_options)
+                self.show_checks[key] = cb
+                pop_box.pack_start(cb, False, False, 0)
             pop_box.show_all()
             popover = Gtk.Popover()
             popover.add(pop_box)
@@ -1039,27 +1137,128 @@ if HAVE_GTK:
 
             self.connect("destroy", Gtk.main_quit)
             self.summary = {}
+            if self.expanded["terminal"] and self.show["terminal"]:
+                self.ensure_terminal()
             for i, cfg in enumerate(cfgs):
                 Poller(cfg, lambda snap, i=i: self.on_update(i, snap)).start()
             VramPoller(self.on_vram).start()
 
+        def _shared_expander(self, name, label, child, outer):
+            exp = Gtk.Expander(label=label)
+            exp.add(child)
+            exp.set_expanded(self.expanded[name])
+            exp.connect("notify::expanded", lambda e, _p, n=name: self._shared_toggled(n, e))
+            exp.show_all()
+            exp.set_no_show_all(True)
+            exp.set_visible(self.show[name])
+            self.shared[name] = exp
+            outer.pack_start(exp, False, False, 0)
+            return exp
+
+        def _shared_toggled(self, name, exp):
+            if not getattr(self, "_syncing", False):
+                self.on_expand(name, exp.get_expanded())
+
+        def on_expand(self, name, value):
+            """A chevron was clicked somewhere: keep every copy of that section in step and remember it."""
+            self.expanded[name] = value
+            self._syncing = True
+            try:
+                for panel in self.panels:
+                    panel.set_section_expanded(name, value)
+                exp = self.shared.get(name)
+                if exp is not None and exp.get_expanded() != value:
+                    exp.set_expanded(value)
+            finally:
+                self._syncing = False
+            if name == "terminal" and value:
+                self.ensure_terminal()
+            self.save()
+
+        # terminal ------------------------------------------------------------
+        def _build_terminal(self):
+            if not HAVE_VTE:
+                self.term_box.pack_start(
+                    make_label("The terminal needs the VTE library:\nsudo apt install gir1.2-vte-2.91", "dim"),
+                    False, False, 8)
+                return
+            self.term = Vte.Terminal()
+            self.term.set_scrollback_lines(5000)
+            self.term.connect("child-exited", self._term_exited)
+            self.term.connect("key-press-event", self._term_key)
+            self.term_box.pack_start(self.term, True, True, 0)
+
+        def ensure_terminal(self):
+            """Start a fresh shell the first time the terminal is opened (and again after it exited)."""
+            if self.term is None or self.term_alive:
+                return
+            shell = os.environ.get("SHELL") or "/bin/bash"
+            try:
+                try:
+                    self.term.spawn_async(Vte.PtyFlags.DEFAULT, os.getcwd(), [shell], None,
+                                          GLib.SpawnFlags.DEFAULT, None, None, -1, None, None)
+                except (TypeError, AttributeError):  # older VTE
+                    self.term.spawn_sync(Vte.PtyFlags.DEFAULT, os.getcwd(), [shell], None,
+                                         GLib.SpawnFlags.DEFAULT, None, None)
+                self.term_alive = True
+            except Exception as e:
+                self.term_alive = False
+                try:
+                    self.term.feed(f"Could not start {shell}: {e}\r\n".encode())
+                except Exception:
+                    pass
+
+        def _term_exited(self, _term, _status):
+            self.term_alive = False
+            try:
+                self.term.feed(b"\r\n[shell exited - collapse and re-open this section for a new one]\r\n")
+            except Exception:
+                pass
+
+        def _term_key(self, term, event):
+            """Ctrl+Shift+C / Ctrl+Shift+V copy and paste, as in other terminals."""
+            both = Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK
+            if (event.state & both) == both:
+                if event.keyval in (Gdk.KEY_C, Gdk.KEY_c):
+                    try:
+                        term.copy_clipboard_format(Vte.Format.TEXT)
+                    except AttributeError:
+                        term.copy_clipboard()
+                    return True
+                if event.keyval in (Gdk.KEY_V, Gdk.KEY_v):
+                    term.paste_clipboard()
+                    return True
+            return False
+
+        # options -------------------------------------------------------------
+        def save(self):
+            save_settings({"always_on_top": self.top.get_active(), "opacity": int(self.opacity.get_value()),
+                           "warnings": self.warn.get_active(), "show": self.show, "expanded": self.expanded})
+
         def apply_options(self, *_a):
             on = self.top.get_active()
-            pct = int(self.opacity.get_value())
             self.opacity.set_sensitive(on)
             self.set_keep_above(on)
-            self.set_opacity(pct / 100 if on else 1.0)  # normal windows stay fully opaque
-            save_settings({"always_on_top": on, "opacity": pct, "warnings": self.warn.get_active()})
+            self.set_opacity(int(self.opacity.get_value()) / 100 if on else 1.0)  # normal windows stay opaque
+            for key, cb in self.show_checks.items():
+                self.show[key] = cb.get_active()
+                for panel in self.panels:
+                    panel.set_section_visible(key, self.show[key])
+                if key in self.shared:
+                    self.shared[key].set_visible(self.show[key])
+            if self.show["terminal"] and self.expanded["terminal"]:
+                self.ensure_terminal()
+            self.save()
 
         def on_vram(self, info):
             if info is None:
-                self.vram_label.set_text("GPU memory: not available (needs AMD sysfs or nvidia-smi)")
+                self.vram_exp.set_label("GPU memory: not available (needs AMD sysfs or nvidia-smi)")
                 self.vram_bar.set_fraction(0)
             else:
                 used, total, name = info
                 frac = used / total if total else 0
-                self.vram_label.set_text(f"GPU memory ({name}): {fmt_gib(used)} / {fmt_gib(total)} GiB  "
-                                         f"({frac * 100:.0f}%)")
+                self.vram_exp.set_label(f"GPU memory ({name}): {fmt_gib(used)} / {fmt_gib(total)} GiB  "
+                                        f"({frac * 100:.0f}%)")
                 set_bar_level(self.vram_bar, frac, warn=0.85, crit=0.95)
             return False
 
