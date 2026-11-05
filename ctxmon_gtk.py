@@ -809,22 +809,23 @@ if HAVE_GTK:
             self.alert = make_label("", "alert", wrap=True)
             self.alert.set_no_show_all(True)
             self.tokens = make_label("0 tokens", "sub")
-            self.free = make_label("", "dim")
-            self.free.set_ellipsize(Pango.EllipsizeMode.END)
+            self.free = make_label("–", "speed")  # time until the context is full (value of the third tile)
             # The source line is the last thing in its block and is one ellipsized line (full text in the
             # tooltip), so a long text can never push the widgets below it around.
             self.source = make_label("", "dim")
             self.source.set_ellipsize(Pango.EllipsizeMode.END)
             self.source.set_max_width_chars(40)
             self.gen = make_label("0.0 t/s", "speed")
-            self.gen_note = make_label("generation", "dim")
-            self.prompt = make_label("", "dim")
-            self.prompt.set_ellipsize(Pango.EllipsizeMode.END)
+            self.gen_note = make_label("", "dim")
+            self.prompt = make_label("–", "speed")
+            self.prompt_note = make_label("", "dim")
+            self.free_note = make_label("", "dim")
             # No scroll windows: the window opens at its natural size, so every label reserves room for its
             # longest normal text up front (otherwise the window would be sized for the short placeholders).
             for lbl, chars in ((self.model, 24), (self.port, 24), (self.status, 30), (self.pct, 6),
-                               (self.tokens, 40), (self.free, 28), (self.source, 40), (self.gen, 9),
-                               (self.gen_note, 25), (self.prompt, 28)):
+                               (self.tokens, 40), (self.source, 40), (self.gen, 9), (self.prompt, 9),
+                               (self.free, 9), (self.gen_note, 16), (self.prompt_note, 16),
+                               (self.free_note, 16)):
                 lbl.set_width_chars(chars)
 
             def vbox(*widgets, spacing=4):
@@ -854,27 +855,20 @@ if HAVE_GTK:
             head.pack_end(section("status", self.status), False, False, 0)
             self.pack_start(head, False, False, 0)
 
-            # Row 2: context on the left, speed on the right. One grid with two equal columns, the same
-            # split as the graph row below, so the speed block starts exactly above the speed graph; the
-            # percentage and the speed share a text baseline.
-            stats = Gtk.Grid()
-            stats.set_column_spacing(12)
-            stats.set_row_spacing(4)
-            stats.set_column_homogeneous(True)
-            stats.set_row_baseline_position(0, Gtk.BaselinePosition.CENTER)
-            self.pct.set_valign(Gtk.Align.BASELINE)
-            self.gen.set_valign(Gtk.Align.BASELINE)
-            self.gen_note.set_valign(Gtk.Align.CENTER)
-            self.prompt.set_valign(Gtk.Align.START)
-            stats.attach(section("percent", self.pct), 0, 0, 1, 1)
-            stats.attach(section("speed", self.gen), 1, 0, 1, 1)
-            stats.attach(section("percent", vbox(self.bar, self.alert)), 0, 1, 1, 1)
-            stats.attach(section("speed", self.gen_note), 1, 1, 1, 1)
-            stats.attach(expander("details", "Details", vbox(self.tokens, self.source)), 0, 2, 1, 1)
-            right_bottom = vbox(self.prompt, self.free, spacing=2)  # prompt speed + "full in ..." estimate
-            right_bottom.set_valign(Gtk.Align.START)
-            stats.attach(section("speed", right_bottom), 1, 2, 1, 1)
-            self.pack_start(stats, False, False, 0)
+            # Row 2: the context bar across the full width, its details, then a strip of three speed tiles.
+            self.pack_start(section("percent", vbox(self.pct, self.bar, self.alert)), False, False, 0)
+            self.pack_start(expander("details", "Details", vbox(self.tokens, self.source)), False, False, 0)
+
+            def tile(title, value, note):
+                return vbox(make_label(title, "dim"), value, note, spacing=1)
+
+            tiles = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            tiles.set_homogeneous(True)
+            tiles.pack_start(section("speed", tile("Generation", self.gen, self.gen_note)), True, True, 0)
+            tiles.pack_start(section("speed", tile("Prompt processing", self.prompt, self.prompt_note)),
+                             True, True, 0)
+            tiles.pack_start(section("speed", tile("Time until full", self.free, self.free_note)), True, True, 0)
+            self.pack_start(tiles, False, False, 0)
 
             # Row 3: the two graphs side by side.
             if HAVE_CAIRO:
@@ -969,11 +963,13 @@ if HAVE_GTK:
                 self.tokens.set_text(f"0 / {ctx:,} tokens · {ctx:,} free")
                 self.source.set_text("")
                 self.source.set_tooltip_text(None)
-                self.free.set_text("")
                 self.alert.hide()
                 self.gen.set_text("0.0 t/s")
-                self.gen_note.set_text("generation")
-                self.prompt.set_text("0.0 t/s prompt processing")
+                self.gen_note.set_text("")
+                self.prompt.set_text("–")
+                self.prompt_note.set_text("")
+                self.free.set_text("–")
+                self.free_note.set_text("")
                 self.status.set_text(f"not running · checked {time.strftime('%H:%M:%S')}")
             else:
                 ctx, shown = v["ctx"], v["shown"]
@@ -986,8 +982,12 @@ if HAVE_GTK:
                 self.tokens.set_text(f"{est}{shown:,} / {ctx:,} tokens · {est}{free:,} free")
                 self.source.set_text(v["source"])
                 self.source.set_tooltip_text(v["source"])
-                self.free.set_text(f"full in ~{fmt_duration(v['eta'])} at this speed"
-                                   if v["eta"] and v["eta"] < 600 else "")
+                if v["eta"] and v["eta"] < 600:
+                    self.free.set_text(f"~{fmt_duration(v['eta'])}")
+                    self.free_note.set_text("at current speed")
+                else:
+                    self.free.set_text("–")
+                    self.free_note.set_text("generating" if v["busy"] else "idle")
                 if v["level"]:
                     crit = v["level"] >= self.state.levels[-1]
                     self.alert.set_text(f"{'Context almost full' if crit else 'Context filling up'}: "
@@ -999,14 +999,19 @@ if HAVE_GTK:
                     self.alert.hide()
                 if v["live"] is not None:
                     self.gen.set_text(f"{v['live']:.1f} t/s")
-                    self.gen_note.set_text("generation · live")
+                    self.gen_note.set_text("live")
                 elif v["gen"] is not None:
                     self.gen.set_text(f"{v['gen']:.1f} t/s")
-                    self.gen_note.set_text("generation · last request")
+                    self.gen_note.set_text("last request")
                 else:
                     self.gen.set_text("0.0 t/s")
-                    self.gen_note.set_text("generation")
-                self.prompt.set_text(f"{v['prompt']:.1f} t/s prompt processing" if v["prompt"] is not None else "")
+                    self.gen_note.set_text("")
+                if v["prompt"] is not None:
+                    self.prompt.set_text(f"{v['prompt']:.1f} t/s")
+                    self.prompt_note.set_text("last request")
+                else:
+                    self.prompt.set_text("–")
+                    self.prompt_note.set_text("")
                 run = "generating" if v["busy"] else "idle"
                 self.status.set_tooltip_text(None if v["log_found"] else f"log not found: {self.cfg.log}")
                 self.status.set_text(f"{run} · {'log not found · ' if not v['log_found'] else ''}"

@@ -8,7 +8,7 @@ Update §1 and add a §6 entry whenever a session ends.
 
 | Field | Value |
 |---|---|
-| Updated | 2026-11-05 ~15:10 |
+| Updated | 2026-11-05 ~15:30 |
 | Repo | github.com/adamjeremy-sk/llm-suite-test (public, GPL-3.0), local `~/Projects/llm-suite-test`, branch `main` |
 | Prompt set | v2 (v1 = refactor, codegen, prose + longctx/xlctx; v2 added math, logic). Core geo-mean = v1 short prompts |
 | Models tested | qwen3.8-27b (complete: see models/qwen3.8-27b/REPORT_2026-11-04.md) |
@@ -98,6 +98,9 @@ Update §1 and add a §6 entry whenever a session ends.
   height only while open. Window refit runs immediately and once more from idle (no-op if already right).
   Tokens and free are one line; the "full in ..." estimate moved under the prompt speed.
 
+- 2026-11-05 — (Adam) ctxmon: context bar spans the full width; generation / prompt-processing / time-until-full are
+  three tiles in a strip below it (replaces the right-hand column and the 2-column stats grid).
+
 ## 5. Open items / backlog
 
 - **First real run of the rebuilt tools** (see §1 caveat).
@@ -122,6 +125,11 @@ Update §1 and add a §6 entry whenever a session ends.
 - Tooling: VRAM reading is AMD-sysfs or `nvidia-smi` only; add others if contributors need them.
 
 ## 6. Session log  *(newest first)*
+
+### 2026-11-05 — ctxmon full-width bar and speed tiles
+- Replaced the stats grid with: pct + full-width bar, Details, then a homogeneous 3-tile strip (title, value, note).
+  "Time until full" shows "–" unless generating (was text under the prompt speed). Logic tests + stubbed-GTK smoke pass;
+  look at the real window.
 
 ### 2026-11-05 — ctxmon dead space / collapse-expand layout bug / taller terminal
 - From Adam's screenshots: big empty area under a short terminal, and after collapsing and re-opening sections the

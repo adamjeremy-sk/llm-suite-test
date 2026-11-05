@@ -76,11 +76,11 @@ work. It is not needed to run the suite. It shows, per server:
   bar is coloured by vendor, not by how full it is (a full GPU is normal when a model is loaded): red for AMD,
   green for NVIDIA, blue for Intel. Intel iGPUs share system RAM and expose no VRAM counters, so blue only
   appears if a driver provides the same sysfs files.
-- **Layout:** each server is a compact card: model and run state on top; context (percentage, bar, details)
-  beside generation and prompt speed; the two graphs side by side; then the request table. Everything sits on
-  the same two-column split: the speed block starts above the speed graph, its figure shares a baseline with
-  the percentage, and the request table's six equal columns span the full width. The exact/estimate
-  line is a single line (full text in its tooltip) placed last in its block, so it can never shift anything.
+- **Layout:** each server is a compact card: model and run state on top; the context percentage with a bar across
+  the full width; the details line (tokens used / total and free, and whether it is exact or an estimate); a strip
+  of three tiles (generation speed, prompt-processing speed, time until the context is full); the two graphs side
+  by side; then the request table. The exact/estimate line is a single line (full text in its tooltip), so it can
+  never shift anything, and the request table's six equal columns span the full width like the graphs.
 - **No scroll bars:** the window opens at the size of its content (labels reserve room for their longest normal
   text) and resizes when you collapse, expand or hide a section. The request table is a fixed grid of the newest
   8 requests (`--rows N`, up to 50 are kept in memory). With several servers the cards sit side by side, so the
