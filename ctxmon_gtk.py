@@ -25,6 +25,7 @@ import glob
 import json
 import os
 import re
+import signal
 import socket
 import subprocess
 import threading
@@ -294,6 +295,7 @@ class Poller(threading.Thread):
 
     def __init__(self, cfg, callback, dispatch=None):
         super().__init__(daemon=True)
+        self.stopping = threading.Event()
         self.cfg = cfg
         self.callback = callback
         self.dispatch = dispatch or (GLib.idle_add if HAVE_GTK else (lambda f, *a: f(*a)))
@@ -384,10 +386,18 @@ class Poller(threading.Thread):
                     state=state, model=self.model, log_found=log_found,
                     gen=self.last_gen, prompt=self.last_prompt, requests=reqs)
 
+    def stop(self):
+        """Ask the thread to finish. It wakes at once if it is waiting between polls; a poll already in
+        progress ends within the 2 s HTTP timeout, and its result is discarded."""
+        self.stopping.set()
+
     def run(self):
-        while True:
-            self.dispatch(self.callback, self.poll_once())
-            time.sleep(self.cfg.interval)
+        while not self.stopping.is_set():
+            snap = self.poll_once()
+            if self.stopping.is_set():
+                break  # don't hand a result to a window that is closing
+            self.dispatch(self.callback, snap)
+            self.stopping.wait(self.cfg.interval)
 
 
 # --------------------------------------------------------------------------- per-server logic (no GTK)
@@ -1128,12 +1138,19 @@ if HAVE_GTK:
     class VramPoller(threading.Thread):
         def __init__(self, callback):
             super().__init__(daemon=True)
+            self.stopping = threading.Event()
             self.callback = callback
 
+        def stop(self):
+            self.stopping.set()
+
         def run(self):
-            while True:
-                GLib.idle_add(self.callback, read_vram())
-                time.sleep(2)
+            while not self.stopping.is_set():
+                info = read_vram()
+                if self.stopping.is_set():
+                    break
+                GLib.idle_add(self.callback, info)
+                self.stopping.wait(2)
 
     class MonitorWindow(Gtk.Window):
         def __init__(self, cfgs, args):
@@ -1245,14 +1262,29 @@ if HAVE_GTK:
                 bottom.pack_end(hide, False, False, 0)
             outer.pack_end(bottom, False, False, 0)
 
-            self.connect("destroy", Gtk.main_quit)
+            self._closing = False
+            self.pollers = []
+            self.connect("destroy", self._on_destroy)
             self.summary = {}
             if self.expanded["terminal"] and self.shown["terminal"]:
                 self.ensure_terminal()
             self._ready = True
             for i, cfg in enumerate(cfgs):
-                Poller(cfg, lambda snap, i=i: self.on_update(i, snap)).start()
-            VramPoller(self.on_vram).start()
+                self.pollers.append(Poller(cfg, lambda snap, i=i: self.on_update(i, snap)))
+            self.pollers.append(VramPoller(self.on_vram))
+            for poller in self.pollers:
+                poller.start()
+
+        def shutdown(self):
+            """Stop the background threads. Safe to call more than once and from any exit path (window
+            Close, tray Quit, Ctrl+C, SIGTERM)."""
+            self._closing = True
+            for poller in self.pollers:
+                poller.stop()
+
+        def _on_destroy(self, _w):
+            self.shutdown()
+            Gtk.main_quit()
 
         def _shared_expander(self, name, label, child):
             exp = Gtk.Expander(label=label)
@@ -1450,6 +1482,8 @@ if HAVE_GTK:
                 pass
 
         def on_vram(self, info):
+            if self._closing:
+                return False
             if info is None:
                 self.vram_exp.set_label("GPU memory: not available (needs AMD sysfs or nvidia-smi)")
                 self.vram_bar.set_fraction(0)
@@ -1475,6 +1509,8 @@ if HAVE_GTK:
                 pass  # no notify-send: the in-window banner still shows the warning
 
         def on_update(self, i, snap):
+            if self._closing:  # a result that was already queued when the window closed
+                return False
             panel = self.panels[i]
             now = time.time()
             v = panel.state.update(snap, now)
@@ -1532,10 +1568,19 @@ def main():
     Gtk.Window.set_default_icon_name("ctxmon")
 
     win = MonitorWindow(cfgs, args)
+    # Ctrl+C / SIGTERM in the launching terminal quit cleanly instead of waiting for the next GTK event.
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, lambda: Gtk.main_quit() or False)
+        except Exception:
+            pass
     win.show_all()
     if args.minimized and win.tray:
         win.hide()
-    Gtk.main()
+    try:
+        Gtk.main()
+    finally:
+        win.shutdown()  # also covers the tray's Quit, which leaves the main loop without closing the window
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ Update §1 and add a §6 entry whenever a session ends.
 
 | Field | Value |
 |---|---|
-| Updated | 2026-11-05 ~16:00 |
+| Updated | 2026-11-05 ~16:20 |
 | Repo | github.com/adamjeremy-sk/llm-suite-test (public, GPL-3.0), local `~/Projects/llm-suite-test`, branch `main` |
 | Prompt set | v2 (v1 = refactor, codegen, prose + longctx/xlctx; v2 added math, logic). Core geo-mean = v1 short prompts |
 | Models tested | qwen3.8-27b (complete: see models/qwen3.8-27b/REPORT_2026-11-04.md) |
@@ -101,6 +101,10 @@ Update §1 and add a §6 entry whenever a session ends.
 - 2026-11-05 — (Adam) ctxmon: context bar spans the full width; generation / prompt-processing / time-until-full are
   three tiles in a strip below it (replaces the right-hand column and the 2-column stats grid).
 
+- 2026-11-05 — (Adam) ctxmon is a personal monitor: an outside review (multi-slot/request ids, diagnostics panel, GPU
+  attribution, clearer prompt-loading context) was **declined**; only clean thread shutdown was adopted. Don't re-propose
+  the others unless Adam asks.
+
 ## 5. Open items / backlog
 
 - **First real run of the rebuilt tools** (see §1 caveat).
@@ -125,6 +129,12 @@ Update §1 and add a §6 entry whenever a session ends.
 - Tooling: VRAM reading is AMD-sysfs or `nvidia-smi` only; add others if contributors need them.
 
 ## 6. Session log  *(newest first)*
+
+### 2026-11-05 — ctxmon clean shutdown
+- Pollers (server + VRAM) now have a stop Event: they wake immediately from the between-poll wait, drop a result that
+  finishes after stop, and the window ignores results already queued once closing. `shutdown()` runs on window Close,
+  tray Quit (main loop exit), Ctrl+C and SIGTERM. A poll already in flight ends within the 2 s HTTP timeout. Tested
+  with a fake server (stop is prompt, nothing delivered after stop); signal handling and real quit paths untested on GTK.
 
 ### 2026-11-05 — README rewrite + screenshot
 - README's ctxmon section restructured (what it shows / window behaviour / usage / troubleshooting) and now has
